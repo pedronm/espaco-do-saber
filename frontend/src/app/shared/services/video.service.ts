@@ -2,12 +2,13 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { Video } from '../models/video.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class VideoService {
-  private apiUrl = 'http://localhost:8080/api/videos';
+  private apiUrl = `${environment.apiUrl}/videos`;
 
   constructor(private http: HttpClient) {}
 

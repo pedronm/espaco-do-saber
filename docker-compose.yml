@@ -24,6 +24,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/espacodosaber
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
+      JWT_SECRET: ${JWT_SECRET:-change-this-in-production-use-openssl-rand-base64-64-to-generate-secure-key}
     ports:
       - "8080:8080"
     volumes:

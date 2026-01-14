@@ -212,9 +212,10 @@ export class TeacherDashboardComponent implements OnInit {
         this.resetForm();
         this.loadVideos();
       },
-      error: () => {
+      error: (error) => {
         this.uploading = false;
-        alert('Upload failed');
+        const errorMessage = error.error?.message || 'Failed to upload video. Please check the file format and try again.';
+        alert(errorMessage);
       }
     });
   }

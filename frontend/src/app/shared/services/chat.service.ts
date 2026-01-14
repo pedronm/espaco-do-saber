@@ -4,19 +4,20 @@ import { Observable } from 'rxjs';
 import { Client } from '@stomp/stompjs';
 import * as SockJS from 'sockjs-client';
 import { ChatMessage } from '../models/chat.model';
+import { environment } from '../../../environments/environment';
 
 @Injectable({
   providedIn: 'root'
 })
 export class ChatService {
-  private apiUrl = 'http://localhost:8080/api/chat';
+  private apiUrl = `${environment.apiUrl}/chat`;
   private stompClient: Client | null = null;
 
   constructor(private http: HttpClient) {}
 
   connect(token: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const socket = new SockJS('http://localhost:8080/ws');
+      const socket = new SockJS(environment.wsUrl);
       this.stompClient = new Client({
         webSocketFactory: () => socket as any,
         connectHeaders: {
