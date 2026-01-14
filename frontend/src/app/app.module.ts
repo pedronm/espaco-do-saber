@@ -9,6 +9,7 @@ import { LoginComponent } from './auth/components/login.component';
 import { RegisterComponent } from './auth/components/register.component';
 import { TeacherDashboardComponent } from './teacher/components/teacher-dashboard.component';
 import { StudentDashboardComponent } from './student/components/student-dashboard.component';
+import { AdminDashboardComponent } from './admin/components/admin-dashboard.component';
 import { JwtInterceptor } from './shared/services/jwt.interceptor';
 
 @NgModule({
@@ -17,7 +18,8 @@ import { JwtInterceptor } from './shared/services/jwt.interceptor';
     LoginComponent,
     RegisterComponent,
     TeacherDashboardComponent,
-    StudentDashboardComponent
+    StudentDashboardComponent,
+    AdminDashboardComponent
   ],
   imports: [
     BrowserModule,

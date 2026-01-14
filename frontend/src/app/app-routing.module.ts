@@ -4,6 +4,7 @@ import { LoginComponent } from './auth/components/login.component';
 import { RegisterComponent } from './auth/components/register.component';
 import { TeacherDashboardComponent } from './teacher/components/teacher-dashboard.component';
 import { StudentDashboardComponent } from './student/components/student-dashboard.component';
+import { AdminDashboardComponent } from './admin/components/admin-dashboard.component';
 import { AuthGuard } from './shared/guards/auth.guard';
 
 const routes: Routes = [
@@ -22,7 +23,7 @@ const routes: Routes = [
   },
   { 
     path: 'admin', 
-    component: TeacherDashboardComponent,
+    component: AdminDashboardComponent,
     canActivate: [AuthGuard]
   },
   { 
