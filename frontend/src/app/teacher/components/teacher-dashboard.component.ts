@@ -44,7 +44,8 @@ import { Video } from '../../shared/models/video.model';
         <div class="video-grid">
           <div class="video-card" *ngFor="let video of videos">
             <div class="video-thumbnail">
-              <video [src]="getStreamUrl(video.id)" width="100%" height="200"></video>
+              <img *ngIf="video.thumbnailPath" [src]="video.thumbnailPath" alt="{{ video.title }}" width="100%" height="200">
+              <div *ngIf="!video.thumbnailPath" class="placeholder-thumbnail"></div>
             </div>
             <div class="video-info">
               <h4>{{ video.title }}</h4>
@@ -129,6 +130,15 @@ import { Video } from '../../shared/models/video.model';
     }
     .video-thumbnail {
       background: #000;
+      height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .placeholder-thumbnail {
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     }
     .video-info {
       padding: 1rem;

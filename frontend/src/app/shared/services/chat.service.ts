@@ -22,9 +22,6 @@ export class ChatService {
         connectHeaders: {
           Authorization: `Bearer ${token}`
         },
-        debug: (str) => {
-          console.log(str);
-        },
         onConnect: () => {
           resolve();
         },
