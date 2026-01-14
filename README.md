@@ -28,7 +28,7 @@ Espaço do Saber is a full-stack streaming platform that enables teachers to upl
 - **Maven** for dependency management
 
 ### Frontend
-- **Angular 17**
+- **Angular 19**
 - **RxJS** for reactive programming
 - **SockJS & STOMP** for WebSocket communication
 - **TypeScript**
