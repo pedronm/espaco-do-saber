@@ -215,6 +215,7 @@ export class TeacherDashboardComponent implements OnInit {
       error: (error) => {
         this.uploading = false;
         const errorMessage = error.error?.message || 'Failed to upload video. Please check the file format and try again.';
+        // TODO: Replace alert() with a proper toast/notification service
         alert(errorMessage);
       }
     });
