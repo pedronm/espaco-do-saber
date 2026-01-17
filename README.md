@@ -251,26 +251,20 @@ Authorization: Bearer {token}
 Edit `backend/src/main/resources/application.yml`:
 
 ```yaml
-# Database
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/espacodosaber
     username: postgres
     password: postgres
-
-# JWT
-jwt:
-  secret: your-secret-key-change-this-in-production-min-256-bits-long-secret-key
-  expiration: 86400000
-
-# File Upload
-spring:
   servlet:
     multipart:
       max-file-size: 500MB
       max-request-size: 500MB
 
-# CORS
+jwt:
+  secret: your-secret-key-change-this-in-production-min-256-bits-long-secret-key
+  expiration: 86400000
+
 cors:
   allowed-origins: http://localhost:4200
 ```
