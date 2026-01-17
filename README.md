@@ -52,7 +52,7 @@ backend/
 │   ├── security/        # JWT and authentication components
 │   └── service/         # Business logic
 ├── src/main/resources/
-│   └── application.properties
+│   └── application.yml
 └── build.gradle
 ```
 
@@ -105,7 +105,7 @@ docker-compose up --build
 cd backend
 ```
 
-2. Configure database in `application.properties` or use H2 for development
+2. Configure database in `application.yml` or use H2 for development
 
 3. Build and run:
 ```bash
@@ -248,24 +248,31 @@ Authorization: Bearer {token}
 
 ### Backend Configuration
 
-Edit `backend/src/main/resources/application.properties`:
+Edit `backend/src/main/resources/application.yml`:
 
-```properties
+```yaml
 # Database
-spring.datasource.url=jdbc:postgresql://localhost:5432/espacodosaber
-spring.datasource.username=postgres
-spring.datasource.password=postgres
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/espacodosaber
+    username: postgres
+    password: postgres
 
 # JWT
-jwt.secret=your-secret-key-change-this-in-production-min-256-bits-long-secret-key
-jwt.expiration=86400000
+jwt:
+  secret: your-secret-key-change-this-in-production-min-256-bits-long-secret-key
+  expiration: 86400000
 
 # File Upload
-spring.servlet.multipart.max-file-size=500MB
-spring.servlet.multipart.max-request-size=500MB
+spring:
+  servlet:
+    multipart:
+      max-file-size: 500MB
+      max-request-size: 500MB
 
 # CORS
-cors.allowed-origins=http://localhost:4200
+cors:
+  allowed-origins: http://localhost:4200
 ```
 
 ### Frontend Configuration
@@ -339,14 +346,14 @@ npm run build --prod
 
 1. **Database Connection Error**
    - Ensure PostgreSQL is running
-   - Check database credentials in application.properties
+   - Check database credentials in application.yml
 
 2. **CORS Error**
    - Verify CORS configuration in SecurityConfig
    - Check allowed origins match your frontend URL
 
 3. **File Upload Error**
-   - Check file size limits in application.properties
+   - Check file size limits in application.yml
    - Verify uploads directory exists and has write permissions
 
 4. **WebSocket Connection Error**
