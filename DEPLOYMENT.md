@@ -73,12 +73,12 @@ docker-compose down -v
 1. **Build the Backend**
 ```bash
 cd backend
-mvn clean package -DskipTests
+./gradlew clean build -x test
 ```
 
 2. **Run the Backend**
 ```bash
-java -jar target/streaming-platform-1.0.0.jar \
+java -jar build/libs/streaming-platform.jar \
   --spring.datasource.url=jdbc:postgresql://localhost:5432/espacodosaber \
   --spring.datasource.username=postgres \
   --spring.datasource.password=your_password \

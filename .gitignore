@@ -1,8 +1,13 @@
-# Backend
+# Backend - Maven
 backend/target/
 backend/.mvn/
 backend/mvnw
 backend/mvnw.cmd
+
+# Backend - Gradle
+backend/build/
+backend/.gradle/
+backend/bin/
 
 # Frontend
 frontend/node_modules/

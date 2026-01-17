@@ -25,7 +25,7 @@ Espaço do Saber is a full-stack streaming platform that enables teachers to upl
 - **JPA/Hibernate** for database access
 - **PostgreSQL** database
 - **WebSocket** for real-time chat
-- **Maven** for dependency management
+- **Gradle** for dependency management
 
 ### Frontend
 - **Angular 19**
@@ -53,7 +53,7 @@ backend/
 │   └── service/         # Business logic
 ├── src/main/resources/
 │   └── application.properties
-└── pom.xml
+└── build.gradle
 ```
 
 ### Frontend Structure
@@ -76,7 +76,7 @@ frontend/
 - Docker and Docker Compose
 - Java 17 (for local development)
 - Node.js 18+ (for local development)
-- Maven 3.6+ (for local development)
+- Gradle 8.5+ (for local development)
 
 ### Quick Start with Docker
 
@@ -109,8 +109,8 @@ cd backend
 
 3. Build and run:
 ```bash
-mvn clean install
-mvn spring-boot:run
+./gradlew clean build
+./gradlew bootRun
 ```
 
 The backend will start on http://localhost:8080
