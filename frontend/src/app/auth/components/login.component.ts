@@ -4,6 +4,7 @@ import { AuthService } from '../../shared/services/auth.service';
 import { LoginRequest } from '../../shared/models/user.model';
 
 @Component({
+  standalone: false,
   selector: 'app-login',
   template: `
     <div class="login-container">
@@ -109,7 +110,7 @@ export class LoginComponent {
   onSubmit(): void {
     this.authService.login(this.credentials).subscribe({
       next: (response) => {
-        const route = this.getDashboardRoute(response.role);
+        const route = this.getDashboardRoute(response.roles ?? []);
         this.router.navigate([route]);
       },
       error: (error) => {
@@ -118,16 +119,23 @@ export class LoginComponent {
     });
   }
 
-  getDashboardRoute(role: string): string {
-    switch (role) {
-      case 'ADMIN':
-        return '/admin';
-      case 'TEACHER':
-        return '/teacher';
-      case 'STUDENT':
-        return '/student';
-      default:
-        return '/';
-    }
+  getDashboardRoute(roles: string[]): string {
+    let route = '/'
+    roles.forEach( role => {
+      switch (role) {
+        case 'ADMIN':
+          route ='/admin';
+          break;
+        case 'TEACHER':
+          route ='/teacher';
+          break;
+        case 'STUDENT':
+          route = '/student';
+          break;
+        default:
+          break;
+      }
+    })    
+    return route
   }
 }

@@ -20,10 +20,11 @@ export interface RegisterRequest {
 }
 
 export interface AuthResponse {
-  token: string;
-  type: string;
-  id: number;
-  username: string;
-  email: string;
-  role: string;
+  token?: string;
+  access_token?: string;
+  type?: string;
+  id?: number;
+  username?: string;
+  email?: string;
+  roles?: [string];
 }

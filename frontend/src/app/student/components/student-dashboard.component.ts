@@ -3,23 +3,29 @@ import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 
 @Component({
+  standalone: false,
   selector: 'app-student-dashboard',
   template: `
     <div class="student-dashboard">
-      <h2>Student Dashboard</h2>
+      <h2>Quadro de aulas</h2>
       <div class="videos-section">
-        <h3>Available Videos</h3>
-        <div class="video-grid">
-          <div class="video-card" *ngFor="let video of videos">
-            <div class="video-thumbnail">
-              <img *ngIf="video.thumbnailPath" [src]="video.thumbnailPath" alt="{{ video.title }}" width="100%" height="200">
-              <div *ngIf="!video.thumbnailPath" class="placeholder-thumbnail"></div>
-            </div>
-            <div class="video-info">
-              <h4>{{ video.title }}</h4>
-              <p>{{ video.description }}</p>
-              <p class="teacher-name">By: {{ video.teacherName }}</p>
-              <span class="badge" [class.live]="video.isLive">{{ video.isLive ? 'LIVE' : 'RECORDED' }}</span>
+        <div *ngIf="videos.length === 0" class="no-videos">
+          <p>Não há videos disponíveis</p>
+        </div>
+        <div *ngIf="videos.length > 0">
+          <h3>Videos disponíveis</h3>
+          <div class="video-grid">
+            <div class="video-card" *ngFor="let video of videos">
+              <div class="video-thumbnail">
+                <img *ngIf="video.thumbnailPath" [src]="video.thumbnailPath" alt="{{ video.title }}" width="100%" height="200">
+                <div *ngIf="!video.thumbnailPath" class="placeholder-thumbnail"></div>
+              </div>
+              <div class="video-info">
+                <h4>{{ video.title }}</h4>
+                <p>{{ video.description }}</p>
+                <p class="teacher-name">By: {{ video.teacherName }}</p>
+                <span class="badge" [class.live]="video.isLive">{{ video.isLive ? 'LIVE' : 'RECORDED' }}</span>
+              </div>
             </div>
           </div>
         </div>
@@ -40,6 +46,11 @@ import { Video } from '../../shared/models/video.model';
       padding: 2rem;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .no-videos {
+      text-align: center;
+      padding: 2rem;
+      color: #999;
     }
     .video-grid {
       display: grid;

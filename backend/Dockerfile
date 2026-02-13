@@ -5,7 +5,7 @@ COPY gradle gradle
 COPY src src
 RUN gradle bootJar --no-daemon
 
-FROM openjdk:17-jdk-slim
+FROM eclipse-temurin:17-jre-ubi9-minimal
 WORKDIR /app
 COPY --from=build /app/build/libs/streaming-platform.jar app.jar
 EXPOSE 8080

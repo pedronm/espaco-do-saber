@@ -4,7 +4,12 @@ import com.espacodosaber.dto.VideoRequest;
 import com.espacodosaber.dto.VideoResponse;
 import com.espacodosaber.model.Video;
 import com.espacodosaber.repository.VideoRepository;
+import com.espacodosaber.security.KeycloakTokenProvider;
 import com.espacodosaber.service.VideoService;
+import com.fasterxml.jackson.databind.JsonNode;
+
+import jakarta.servlet.http.HttpServletRequest;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -12,14 +17,16 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.Enumeration;
 import java.util.List;
 
 @RestController
@@ -32,8 +39,20 @@ public class VideoController {
     @Autowired
     private VideoRepository videoRepository;
 
+    private String getTokenFromHeader(String authHeader) {
+        if (authHeader != null && authHeader.startsWith("Bearer ") ) {
+            String token = authHeader.substring(7);
+            try{ 
+                JsonNode userInfo = new KeycloakTokenProvider().getUserInfoFromKeycloak(token);
+                return userInfo.get("preferred_username").asText();
+            } catch (Exception e ){
+                return null;
+            }
+        }
+        return null;
+    }
+
     @PostMapping("/upload")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
     public ResponseEntity<VideoResponse> uploadVideo(
             @RequestParam("file") MultipartFile file,
             @RequestParam("title") String title,
@@ -58,9 +77,14 @@ public class VideoController {
     }
 
     @GetMapping("/my-videos")
-    @PreAuthorize("hasAnyRole('TEACHER', 'ADMIN')")
-    public ResponseEntity<List<VideoResponse>> getMyVideos(Authentication authentication) {
-        return ResponseEntity.ok(videoService.getTeacherVideos(authentication.getName()));
+    public ResponseEntity<List<VideoResponse>> getMyVideos(@RequestHeader(value = "Authorization", required = false) String authHeader) {        
+        String username = getTokenFromHeader(authHeader);
+
+        if(username == null){
+            return ResponseEntity.status(401).build();
+        }
+
+        return ResponseEntity.ok(videoService.getTeacherVideos(username));
     }
 
     @GetMapping("/{id}")

@@ -3,6 +3,7 @@ import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 
 @Component({
+  standalone: false,
   selector: 'app-admin-dashboard',
   template: `
     <div class="admin-dashboard">

@@ -1,20 +1,23 @@
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from './shared/services/auth.service';
+import { environment } from '../environments/environment';
 
 @Component({
+  standalone: false,
   selector: 'app-root',
   template: `
     <div class="app-container">
       <nav class="navbar" *ngIf="isAuthenticated">
         <div class="nav-brand">
+          <img [src]="logoPath" [alt]="logoAlt" class="logo">
           <h1>Espaço do Saber</h1>
         </div>
         <div class="nav-links">
-          <a [routerLink]="getDashboardRoute()" routerLinkActive="active">Dashboard</a>
-          <a *ngIf="isTeacher || isAdmin" [routerLink]="['/teacher']" routerLinkActive="active">My Videos</a>
-          <a [routerLink]="['/videos']" routerLinkActive="active">Browse Videos</a>
-          <button (click)="logout()" class="btn-logout">Logout</button>
+          <a [routerLink]="getDashboardRoute()" routerLinkActive="active">Quadro de aulas</a>
+          <a *ngIf="isTeacher || isAdmin" [routerLink]="['/teacher']" routerLinkActive="active">Minhas gravações</a>
+          <a [routerLink]="['/videos']" routerLinkActive="active">Videos</a>
+          <button (click)="logout()" class="btn-logout">Sair</button>
         </div>
       </nav>
       <main class="main-content">
@@ -35,6 +38,15 @@ import { AuthService } from './shared/services/auth.service';
       justify-content: space-between;
       align-items: center;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    .nav-brand .logo {
+      height: 50px;
+      width: auto;
     }
     .nav-brand h1 {
       margin: 0;
@@ -73,6 +85,9 @@ import { AuthService } from './shared/services/auth.service';
   `]
 })
 export class AppComponent {
+  logoPath = environment.appLogo;
+  logoAlt = 'Espaço do Saber Logo';
+
   constructor(
     private authService: AuthService,
     private router: Router
@@ -93,17 +108,22 @@ export class AppComponent {
   getDashboardRoute(): string {
     const user = this.authService.currentUserValue;
     if (!user) return '/login';
-    
-    switch (user.role) {
-      case 'ADMIN':
-        return '/admin';
-      case 'TEACHER':
-        return '/teacher';
-      case 'STUDENT':
-        return '/student';
-      default:
-        return '/';
-    }
+    console.log(`User Logged In: ${user.roles}`);
+    let route = '/';
+    user.roles?.forEach( role => {
+      switch (role) {
+        case 'ADMIN':
+          route ='/admin';
+          break;
+        case 'TEACHER':
+          route ='/teacher';
+          break;
+        case 'STUDENT':
+          route ='/student';
+          break;
+      }
+    });
+    return route;
   }
 
   logout(): void {

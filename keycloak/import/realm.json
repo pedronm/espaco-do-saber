@@ -1,0 +1,168 @@
+{
+  "realm": "espacodosaber",
+  "enabled": true,
+  "displayName": "Espaço do Saber",
+  "displayNameHtml": "<b>Espaço do Saber</b>",
+  "notBefore": 0,
+  "revokeRefreshToken": false,
+  "refreshTokenMaxReuse": 0,
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "offlineSessionIdleTimeout": 2592000,
+  "offlineSessionMaxLifespan": 5184000,
+  "clientSessionIdleTimeout": 0,
+  "clientSessionMaxLifespan": 0,
+  "clientOfflineSessionIdleTimeout": 0,
+  "clientOfflineSessionMaxLifespan": 0,
+  "accessCodeLifespan": 60,
+  "accessCodeLifespanUserAction": 300,
+  "accessCodeLifespanLogin": 1800,
+  "actionTokenGeneratedByAdminLifespan": 43200,
+  "actionTokenGeneratedByUserLifespan": 300,
+  "defaultRole": {
+    "name": "default-roles-espacodosaber",
+    "description": "${role_default-roles}"
+  },
+  "requiredCredentials": [
+    "password"
+  ],
+  "passwordPolicy": "length(4)",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyInitialCounter": 0,
+  "otpPolicyDigits": 6,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyPeriod": 30,
+  "otpSupportedApplications": [
+    "FreeOTP",
+    "Google Authenticator"
+  ],
+  "webAuthnPolicyRpEntityName": "keycloak",
+  "webAuthnPolicyRpId": "",
+  "webAuthnPolicyAttestationConveyancePreference": "not specified",
+  "webAuthnPolicyAuthenticatorAttachment": "not specified",
+  "webAuthnPolicyRequireResidentKey": "not specified",
+  "webAuthnPolicyUserVerificationRequirement": "not specified",
+  "webAuthnPolicyCreateTimeout": 0,
+  "webAuthnPolicyAcceptableAaguids": [],
+ 
+  "clients": [
+    {
+      "clientId": "backend-client",
+      "name": "Backend Client",
+      "description": "Backend Spring Boot Application",
+      "protocol": "openid-connect",
+      "baseUrl": "http://backend:8080",
+      "redirectUris": [
+        "http://backend:8080/*"
+      ],
+      "webOrigins": [
+        "*"
+      ],
+      "enabled": true,
+      "alwaysDisplayInConsole": false,      
+      "secret": "backend-secret",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": true,
+      "authorizationServicesEnabled": false,
+      "consentRequired": false,
+      "defaultClientScopes": ["email", "profile", "roles", "web-origins", "acr"],
+      "optionalClientScopes": ["address", "phone", "offline_access", "microprofile-jwt"],
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "roles": {
+    "realm": [
+      {
+        "name": "ADMIN",
+        "description": "Administrator role with full access"
+      },
+      {
+        "name": "TEACHER",
+        "description": "Teacher role for content creators"
+      },
+      {
+        "name": "STUDENT",
+        "description": "Student role for learners"
+      }
+    ]
+  },
+  "users": [
+    {
+      "username": "admin",
+      "email": "admin@espacodosaber.com",
+      "emailVerified": true,
+      "firstName": "Admin",
+      "lastName": "User",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123"
+        }
+      ],
+      "realmRoles": [
+        "default-roles-espacodosaber",
+        "ADMIN"
+      ],
+      "clientRoles": {} 
+
+    },
+    {
+      "username": "teacher",
+      "email": "teacher@espacodosaber.com",
+      "emailVerified": true,
+      "firstName": "João",
+      "lastName": "Professor",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "teacher123"
+        }
+      ],
+      "realmRoles": [        
+        "default-roles-espacodosaber",
+        "TEACHER"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "aluno",
+      "email": "aluno@espacodosaber.com",
+      "emailVerified": true,
+      "firstName": "Maria",
+      "lastName": "Aluno",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "aluno123"
+        }
+      ],
+      "realmRoles": [        
+        "default-roles-espacodosaber",
+        "STUDENT" 
+      ],
+      "clientRoles": {}
+    }
+  ]
+}

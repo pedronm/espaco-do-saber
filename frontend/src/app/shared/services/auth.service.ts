@@ -51,7 +51,7 @@ export class AuthService {
 
   getToken(): string | null {
     const user = this.currentUserValue;
-    return user ? user.token : null;
+    return user ? (user as any).access_token || user.token : null;
   }
 
   isAuthenticated(): boolean {
@@ -60,6 +60,6 @@ export class AuthService {
 
   hasRole(role: string): boolean {
     const user = this.currentUserValue;
-    return user ? user.role === role : false;
+    return user ? user?.roles?.find(r => r === role) !== undefined : false;
   }
 }

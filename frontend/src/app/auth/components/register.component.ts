@@ -4,6 +4,7 @@ import { AuthService } from '../../shared/services/auth.service';
 import { RegisterRequest } from '../../shared/models/user.model';
 
 @Component({
+  standalone: false,
   selector: 'app-register',
   template: `
     <div class="register-container">
@@ -127,7 +128,7 @@ export class RegisterComponent {
   onSubmit(): void {
     this.authService.register(this.registerData).subscribe({
       next: (response) => {
-        const route = this.getDashboardRoute(response.role);
+        const route = this.getDashboardRoute(response?.roles ?? []);
         this.router.navigate([route]);
       },
       error: (error) => {
@@ -136,16 +137,23 @@ export class RegisterComponent {
     });
   }
 
-  getDashboardRoute(role: string): string {
-    switch (role) {
-      case 'ADMIN':
-        return '/admin';
-      case 'TEACHER':
-        return '/teacher';
-      case 'STUDENT':
-        return '/student';
-      default:
-        return '/';
-    }
+  getDashboardRoute(roles: string[]): string {
+    let route = '/'
+    roles.forEach( role => {
+      switch (role) {
+        case 'ADMIN':
+          route ='/admin';
+          break;
+        case 'TEACHER':
+          route ='/teacher';
+          break;
+        case 'STUDENT':
+          route = '/student';
+          break;
+        default:
+          route = '/';
+      }
+    });
+    return route;
   }
 }

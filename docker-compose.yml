@@ -2,24 +2,67 @@ version: '3.8'
 
 services:
   postgres:
-    image: postgres:15-alpine
+    image: postgres:17-alpine
     container_name: espacodosaber-db
     environment:
       POSTGRES_DB: espacodosaber
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_INITDB_ARGS: "-c max_connections=200"
     ports:
       - "5432:5432"
     volumes:
+      - ./docker/postgre/init-scripts:/docker-entrypoint-initdb.d
       - postgres_data:/var/lib/postgresql/data
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.0
+    container_name: espacodosaber-keycloak
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health/ready"]
+      interval: 15s
+      timeout: 2s
+      retries: 15
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME_STRICT_BACKCHANNEL: "true"
+      KC_HEALTH_ENABLED: "true"
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8081
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY: "edge"
+      KC_LOG_LEVEL: INFO
+    ports:
+      - "8081:8080"
+    networks:
+      - app-network
+    command: 
+      - start-dev
+      - --import-realm
+    volumes:
+      - ./keycloak/import:/opt/keycloak/data/import
 
   backend:
     build: ./backend
     container_name: espacodosaber-backend
     depends_on:
       - postgres
+      - keycloak
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/espacodosaber
       SPRING_DATASOURCE_USERNAME: postgres
@@ -32,6 +75,35 @@ services:
     networks:
       - app-network
 
+  video-processing:
+    build: ./video-management/video-processing
+    container_name: espacodosaber-video-processing
+    depends_on:
+      - video-storage
+    environment:
+      MINIO_ENDPOINT: video-storage
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "8000:8000"
+    networks:
+      - app-network
+  video-streaming:
+    build: ./video-management/video-streaming
+    container_name: espacodosaber-video-streaming
+    depends_on:
+      - video-storage
+    environment:
+      MINIO_ENDPOINT: video-storage
+      MINIO_PORT: 9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    ports:
+      - "1935:1935"
+      - "8083:8083"
+    networks:
+      - app-network
   frontend:
     build: ./frontend
     container_name: espacodosaber-frontend
@@ -42,6 +114,14 @@ services:
     networks:
       - app-network
 
+  video-storage:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - app-network
 volumes:
   postgres_data:
 
