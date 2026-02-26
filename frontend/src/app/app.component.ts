@@ -16,6 +16,7 @@ import { environment } from '../environments/environment';
         <div class="nav-links">
           <a [routerLink]="getDashboardRoute()" routerLinkActive="active">Quadro de aulas</a>
           <a *ngIf="isTeacher || isAdmin" [routerLink]="['/teacher']" routerLinkActive="active">Minhas gravações</a>
+          <a *ngIf="isTeacher || isAdmin" [routerLink]="['/live']" routerLinkActive="active">Live</a>
           <a [routerLink]="['/videos']" routerLinkActive="active">Videos</a>
           <button (click)="logout()" class="btn-logout">Sair</button>
         </div>
@@ -38,6 +39,9 @@ import { environment } from '../environments/environment';
       justify-content: space-between;
       align-items: center;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
     }
     .nav-brand {
       display: flex;

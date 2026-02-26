@@ -1,4 +1,5 @@
 import { Component, OnInit } from '@angular/core';
+import { Router } from '@angular/router';
 import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 
@@ -8,28 +9,15 @@ import { Video } from '../../shared/models/video.model';
   template: `
     <div class="student-dashboard">
       <h2>Quadro de aulas</h2>
-      <div class="videos-section">
-        <div *ngIf="videos.length === 0" class="no-videos">
-          <p>Não há videos disponíveis</p>
-        </div>
-        <div *ngIf="videos.length > 0">
-          <h3>Videos disponíveis</h3>
-          <div class="video-grid">
-            <div class="video-card" *ngFor="let video of videos">
-              <div class="video-thumbnail">
-                <img *ngIf="video.thumbnailPath" [src]="video.thumbnailPath" alt="{{ video.title }}" width="100%" height="200">
-                <div *ngIf="!video.thumbnailPath" class="placeholder-thumbnail"></div>
-              </div>
-              <div class="video-info">
-                <h4>{{ video.title }}</h4>
-                <p>{{ video.description }}</p>
-                <p class="teacher-name">By: {{ video.teacherName }}</p>
-                <span class="badge" [class.live]="video.isLive">{{ video.isLive ? 'LIVE' : 'RECORDED' }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <app-live-stream-list title="Transmissões em andamento"></app-live-stream-list>
+       <app-video-grid 
+        [isLoading]="isLoading"
+        [videos]="videos" 
+        title="Meus Videos"
+        [showThumbnail]="true"
+        [showTeacherName]="false"
+        (videoSelected)="onVideoSelected($event)">
+      </app-video-grid>
     </div>
   `,
   styles: [`
@@ -112,20 +100,49 @@ import { Video } from '../../shared/models/video.model';
 })
 export class StudentDashboardComponent implements OnInit {
   videos: Video[] = [];
+  isLoading: boolean = false;
 
-  constructor(private videoService: VideoService) {}
+  constructor(private videoService: VideoService, private router: Router) {}
 
   ngOnInit(): void {
     this.loadVideos();
   }
 
+  onVideoSelected(video: Video): void {
+    const liveId = this.extractLiveIdFromStreamingUrl(video.streamingUrl);
+    if (video.isLive && liveId) {
+      this.router.navigate(['/video/live', liveId]);
+      return;
+    }
+
+    this.router.navigate(['/video', video.id]);
+  }
+
   loadVideos(): void {
-    this.videoService.getPublicVideos().subscribe(videos => {
+    this.videoService.getDashboardVideos().subscribe(videos => {
       this.videos = videos;
     });
   }
 
   getStreamUrl(id: number): string {
     return this.videoService.getStreamUrl(id);
+  }
+
+  private extractLiveIdFromStreamingUrl(streamingUrl: string | undefined): string | null {
+    if (!streamingUrl) {
+      return null;
+    }
+
+    const recordingMatch = streamingUrl.match(/\/stream\/live\/([^/]+)\/recording/);
+    if (recordingMatch?.[1]) {
+      return recordingMatch[1];
+    }
+
+    const hlsMatch = streamingUrl.match(/\/stream\/live\/([^/]+)\/hls\//);
+    if (hlsMatch?.[1]) {
+      return hlsMatch[1];
+    }
+
+    return null;
   }
 }

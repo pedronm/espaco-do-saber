@@ -6,7 +6,10 @@ import { TeacherDashboardComponent } from './teacher/components/teacher-dashboar
 import { StudentDashboardComponent } from './student/components/student-dashboard.component';
 import { AdminDashboardComponent } from './admin/components/admin-dashboard.component';
 import { HomeComponent } from './pages/home-component/home.component'
+import { VideoPlayerComponent } from './shared/components/video-player.component';
+import { LiveStreamComponent } from './shared/components/live-stream.component';
 import { AuthGuard } from './shared/guards/auth.guard';
+import { LiveStreamExitGuard } from './shared/guards/live-stream-exit.guard';
 
 const routes: Routes = [
   { path: '', redirectTo: '/login', pathMatch: 'full' },
@@ -20,22 +23,43 @@ const routes: Routes = [
   { 
     path: 'teacher', 
     component: TeacherDashboardComponent,
-    canActivate: [AuthGuard]
+    canActivate: [AuthGuard],
+    data: { roles: ['TEACHER', 'ADMIN'] }
   },
   { 
     path: 'student', 
     component: StudentDashboardComponent,
-    canActivate: [AuthGuard]
+    canActivate: [AuthGuard],
+    data: { roles: ['STUDENT', 'ADMIN', 'TEACHER'] }
   },
   { 
     path: 'admin', 
     component: AdminDashboardComponent,
-    canActivate: [AuthGuard]
+    canActivate: [AuthGuard],
+    data: { roles: ['ADMIN'] }
   },
   { 
     path: 'videos', 
     component: StudentDashboardComponent,
+    canActivate: [AuthGuard],
+    data: { roles: ['STUDENT', 'ADMIN', 'TEACHER'] }
+  },
+  { 
+    path: 'video/:id', 
+    component: VideoPlayerComponent,
     canActivate: [AuthGuard]
+  },
+  {
+    path: 'video/live/:liveId',
+    component: VideoPlayerComponent,
+    canActivate: [AuthGuard]
+  },
+  {
+    path: 'live',
+    component: LiveStreamComponent,
+    canActivate: [AuthGuard],
+    data: { roles: ['TEACHER', 'ADMIN'] },
+    canDeactivate: [LiveStreamExitGuard]
   }
 ];
 

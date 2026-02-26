@@ -87,11 +87,26 @@ user-messages:
   base-uri: http://backend:8091/user/messages
 
 # ============================================================================
+# Video Processing CONFIGURATION
+# ============================================================================
+
+video-processing:
+  base-uri: http://video-processing:8000/videos
+
+video-streaming:
+  base-uri: http://video-streaming:8083
+
+# ============================================================================
 # STREAMING CONFIGURATION
 # ============================================================================
 streaming:
   chunk-size: 1048576
   buffer-size: 8192
+  auth-debug-log: ${STREAMING_AUTH_DEBUG_LOG:false}
+  udp:
+    host: ${STREAMING_UDP_HOST:video-streaming}
+    port: ${STREAMING_UDP_PORT:5005}
+    mtu: ${STREAMING_UDP_MTU:60000}
 
 # ============================================================================
 # CORS CONFIGURATION

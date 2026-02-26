@@ -1,4 +1,5 @@
 import { Component, OnInit } from '@angular/core';
+import { Router } from '@angular/router';
 import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 
@@ -6,60 +7,86 @@ import { Video } from '../../shared/models/video.model';
   standalone: false,
   selector: 'app-teacher-dashboard',
   template: `
+    <div class="loading-overlay" *ngIf="isLoading">
+      <div class="spinner"></div>
+      <p>Carregando vídeo...</p>
+    </div>
     <div class="teacher-dashboard">
-      <h2>Teacher Dashboard</h2>
+      <h2>Painel do Professor</h2>
+      <app-live-stream-list title="Transmissões em andamento"></app-live-stream-list>
       <div class="upload-section">
-        <h3>Upload New Video</h3>
+        <h3>Enviar Novo Vídeo</h3>
         <form (ngSubmit)="onUpload()">
           <div class="form-group">
-            <label>Title</label>
+            <label>Título</label>
             <input type="text" [(ngModel)]="title" name="title" required>
           </div>
           <div class="form-group">
-            <label>Description</label>
+            <label>Descrição</label>
             <textarea [(ngModel)]="description" name="description" rows="3"></textarea>
           </div>
           <div class="form-group">
-            <label>Video File</label>
+            <label>Arquivo de Vídeo</label>
             <input type="file" (change)="onFileSelected($event)" accept="video/*" required>
           </div>
           <div class="form-group">
             <label>
               <input type="checkbox" [(ngModel)]="isPublic" name="isPublic">
-              Make Public
+              Tornar Público
             </label>
           </div>
           <div class="form-group">
             <label>
               <input type="checkbox" [(ngModel)]="isLive" name="isLive">
-              Live Stream
+              Transmissão Ao Vivo
             </label>
           </div>
           <button type="submit" class="btn-primary" [disabled]="uploading">
-            {{ uploading ? 'Uploading...' : 'Upload Video' }}
+            {{ uploading ? 'Enviando...' : 'Enviar Vídeo' }}
           </button>
         </form>
       </div>
-      <div class="videos-section">
-        <h3>My Videos</h3>
-        <div class="video-grid">
-          <div class="video-card" *ngFor="let video of videos">
-            <div class="video-thumbnail">
-              <img *ngIf="video.thumbnailPath" [src]="video.thumbnailPath" alt="{{ video.title }}" width="100%" height="200">
-              <div *ngIf="!video.thumbnailPath" class="placeholder-thumbnail"></div>
-            </div>
-            <div class="video-info">
-              <h4>{{ video.title }}</h4>
-              <p>{{ video.description }}</p>
-              <span class="badge" [class.live]="video.isLive">{{ video.isLive ? 'LIVE' : 'RECORDED' }}</span>
-              <span class="badge" [class.public]="video.isPublic">{{ video.isPublic ? 'PUBLIC' : 'PRIVATE' }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <app-video-grid 
+        [isLoading]="isLoading"
+        [videos]="videos" 
+        title="Meus Videos"
+        [showThumbnail]="true"
+        [showTeacherName]="false"
+        (videoSelected)="onVideoSelected($event)">
+      </app-video-grid>
     </div>
   `,
   styles: [`
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #1976d2;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 1rem;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .loading-overlay p {
+      color: white;
+      font-size: 1.1rem;
+    }
     .teacher-dashboard {
       max-width: 1200px;
       margin: 0 auto;
@@ -107,69 +134,6 @@ import { Video } from '../../shared/models/video.model';
       background: #ccc;
       cursor: not-allowed;
     }
-    .videos-section {
-      background: white;
-      padding: 2rem;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .video-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 1.5rem;
-      margin-top: 1rem;
-    }
-    .video-card {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      overflow: hidden;
-      transition: transform 0.3s;
-    }
-    .video-card:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    .video-thumbnail {
-      background: #000;
-      height: 200px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    .placeholder-thumbnail {
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    .video-info {
-      padding: 1rem;
-    }
-    .video-info h4 {
-      margin: 0 0 0.5rem 0;
-      color: #333;
-    }
-    .video-info p {
-      margin: 0 0 0.5rem 0;
-      color: #666;
-      font-size: 0.9rem;
-    }
-    .badge {
-      display: inline-block;
-      padding: 0.25rem 0.5rem;
-      background: #e0e0e0;
-      color: #555;
-      border-radius: 4px;
-      font-size: 0.8rem;
-      margin-right: 0.5rem;
-    }
-    .badge.live {
-      background: #f44336;
-      color: white;
-    }
-    .badge.public {
-      background: #4caf50;
-      color: white;
-    }
   `]
 })
 export class TeacherDashboardComponent implements OnInit {
@@ -180,15 +144,26 @@ export class TeacherDashboardComponent implements OnInit {
   isLive: boolean = false;
   selectedFile: File | null = null;
   uploading: boolean = false;
+  isLoading: boolean = false;
 
-  constructor(private videoService: VideoService) {}
+  constructor(private videoService: VideoService, private router: Router) {}
 
   ngOnInit(): void {
     this.loadVideos();
   }
 
+  onVideoSelected(video: Video): void {
+    this.isLoading = true;
+    this.router.navigate(['/video', video.id])
+      .then((ctn) => {
+        console.log(ctn);
+        this.isLoading = false;
+      })
+      .finally(() => this.isLoading = false);
+  }
+
   loadVideos(): void {
-    this.videoService.getMyVideos().subscribe(videos => {
+    this.videoService.getDashboardVideos().subscribe(videos => {
       this.videos = videos;
     });
   }
@@ -215,7 +190,7 @@ export class TeacherDashboardComponent implements OnInit {
       },
       error: (error) => {
         this.uploading = false;
-        const errorMessage = error.error?.message || 'Failed to upload video. Please check the file format and try again.';
+        const errorMessage = error.error?.message || 'Falha ao enviar vídeo. Verifique o formato do arquivo e tente novamente.';
         // TODO: Replace alert() with a proper toast/notification service
         alert(errorMessage);
       }
@@ -228,9 +203,5 @@ export class TeacherDashboardComponent implements OnInit {
     this.isPublic = false;
     this.isLive = false;
     this.selectedFile = null;
-  }
-
-  getStreamUrl(id: number): string {
-    return this.videoService.getStreamUrl(id);
   }
 }

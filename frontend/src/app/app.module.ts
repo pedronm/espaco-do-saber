@@ -10,7 +10,11 @@ import { RegisterComponent } from './auth/components/register.component';
 import { TeacherDashboardComponent } from './teacher/components/teacher-dashboard.component';
 import { StudentDashboardComponent } from './student/components/student-dashboard.component';
 import { AdminDashboardComponent } from './admin/components/admin-dashboard.component';
+import { VideoPlayerComponent } from './shared/components/video-player.component';
+import { VideoGridComponent } from './shared/components/video-grid.component';
+import { LiveStreamListComponent } from './shared/components/live-stream-list.component';
 import { JwtInterceptor } from './shared/services/jwt.interceptor';
+import { CommonModule } from '@angular/common';
 
 @NgModule({
   declarations: [
@@ -19,13 +23,17 @@ import { JwtInterceptor } from './shared/services/jwt.interceptor';
     RegisterComponent,
     TeacherDashboardComponent,
     StudentDashboardComponent,
-    AdminDashboardComponent
+    AdminDashboardComponent,
+    VideoPlayerComponent,
+    VideoGridComponent,
+    LiveStreamListComponent
   ],
   imports: [
     BrowserModule,
     AppRoutingModule,
     FormsModule,
-    HttpClientModule
+    HttpClientModule,
+    CommonModule
   ],
   providers: [
     {

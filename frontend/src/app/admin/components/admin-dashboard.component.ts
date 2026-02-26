@@ -1,4 +1,5 @@
 import { Component, OnInit } from '@angular/core';
+import { Router } from '@angular/router';
 import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 
@@ -7,35 +8,29 @@ import { Video } from '../../shared/models/video.model';
   selector: 'app-admin-dashboard',
   template: `
     <div class="admin-dashboard">
-      <h2>Admin Dashboard</h2>
+      <h2>Painel do Administrador</h2>
+      <app-live-stream-list title="Transmissões em andamento"></app-live-stream-list>
       <div class="stats">
         <div class="stat-card">
-          <h3>Total Videos</h3>
+          <h3>Total de Vídeos</h3>
           <p class="stat-number">{{ videos.length }}</p>
         </div>
         <div class="stat-card">
-          <h3>Live Streams</h3>
+          <h3>Transmissões ao Vivo</h3>
           <p class="stat-number">{{ liveVideos }}</p>
         </div>
         <div class="stat-card">
-          <h3>Public Videos</h3>
+          <h3>Vídeos Públicos</h3>
           <p class="stat-number">{{ publicVideos }}</p>
         </div>
       </div>
-      <div class="videos-section">
-        <h3>All Videos</h3>
-        <div class="video-grid">
-          <div class="video-card" *ngFor="let video of videos">
-            <div class="video-info">
-              <h4>{{ video.title }}</h4>
-              <p>{{ video.description }}</p>
-              <p class="teacher-name">Teacher: {{ video.teacherName }}</p>
-              <span class="badge" [class.live]="video.isLive">{{ video.isLive ? 'LIVE' : 'RECORDED' }}</span>
-              <span class="badge" [class.public]="video.isPublic">{{ video.isPublic ? 'PUBLIC' : 'PRIVATE' }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <app-video-grid 
+        [videos]="videos" 
+        title="Todos os Vídeos"
+        [showThumbnail]="false"
+        [showTeacherName]="true"
+        (videoSelected)="onVideoSelected($event)">
+      </app-video-grid>
     </div>
   `,
   styles: [`
@@ -71,71 +66,19 @@ import { Video } from '../../shared/models/video.model';
       color: #1976d2;
       margin: 0;
     }
-    .videos-section {
-      background: white;
-      padding: 2rem;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-    .video-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 1.5rem;
-      margin-top: 1rem;
-    }
-    .video-card {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 1rem;
-      transition: transform 0.3s;
-    }
-    .video-card:hover {
-      transform: translateY(-5px);
-      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    .video-info h4 {
-      margin: 0 0 0.5rem 0;
-      color: #333;
-    }
-    .video-info p {
-      margin: 0 0 0.5rem 0;
-      color: #666;
-      font-size: 0.9rem;
-    }
-    .teacher-name {
-      color: #1976d2;
-      font-weight: 500;
-    }
-    .badge {
-      display: inline-block;
-      padding: 0.25rem 0.5rem;
-      background: #e0e0e0;
-      color: #555;
-      border-radius: 4px;
-      font-size: 0.8rem;
-      margin-right: 0.5rem;
-    }
-    .badge.live {
-      background: #f44336;
-      color: white;
-    }
-    .badge.public {
-      background: #4caf50;
-      color: white;
-    }
   `]
 })
 export class AdminDashboardComponent implements OnInit {
   videos: Video[] = [];
 
-  constructor(private videoService: VideoService) {}
+  constructor(private videoService: VideoService, private router: Router) {}
 
   ngOnInit(): void {
-    this.loadVideos();
+    this.loadAllVideos();
   }
 
-  loadVideos(): void {
-    this.videoService.getPublicVideos().subscribe(videos => {
+  loadAllVideos(): void {
+    this.videoService.getDashboardVideos().subscribe(videos => {
       this.videos = videos;
     });
   }
@@ -146,5 +89,33 @@ export class AdminDashboardComponent implements OnInit {
 
   get publicVideos(): number {
     return this.videos.filter(v => v.isPublic).length;
+  }
+
+  onVideoSelected(video: Video): void {
+    const liveId = this.extractLiveIdFromStreamingUrl(video.streamingUrl);
+    if (video.isLive && liveId) {
+      this.router.navigate(['/video/live', liveId]);
+      return;
+    }
+
+    this.router.navigate(['/video', video.id]);
+  }
+
+  private extractLiveIdFromStreamingUrl(streamingUrl: string | undefined): string | null {
+    if (!streamingUrl) {
+      return null;
+    }
+
+    const recordingMatch = streamingUrl.match(/\/stream\/live\/([^/]+)\/recording/);
+    if (recordingMatch?.[1]) {
+      return recordingMatch[1];
+    }
+
+    const hlsMatch = streamingUrl.match(/\/stream\/live\/([^/]+)\/hls\//);
+    if (hlsMatch?.[1]) {
+      return hlsMatch[1];
+    }
+
+    return null;
   }
 }

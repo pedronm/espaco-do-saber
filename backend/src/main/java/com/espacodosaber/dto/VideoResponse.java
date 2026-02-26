@@ -15,4 +15,5 @@ public class VideoResponse {
     private Boolean isLive;
     private Boolean isPublic;
     private LocalDateTime uploadedAt;
+    private String streamingUrl;
 }

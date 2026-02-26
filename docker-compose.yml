@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   postgres:
     image: postgres:17-alpine
@@ -68,6 +66,10 @@ services:
       SPRING_DATASOURCE_USERNAME: postgres
       SPRING_DATASOURCE_PASSWORD: postgres
       JWT_SECRET: ${JWT_SECRET:-change-this-in-production-use-openssl-rand-base64-64-to-generate-secure-key}
+      STREAMING_UDP_HOST: video-streaming
+      STREAMING_UDP_PORT: 5005
+      STREAMING_UDP_MTU: 60000
+      STREAMING_AUTH_DEBUG_LOG: ${STREAMING_AUTH_DEBUG_LOG:-false}
     ports:
       - "8080:8080"
     volumes:
@@ -79,7 +81,8 @@ services:
     build: ./video-management/video-processing
     container_name: espacodosaber-video-processing
     depends_on:
-      - video-storage
+      video-storage:
+        condition: service_healthy
     environment:
       MINIO_ENDPOINT: video-storage
       MINIO_PORT: 9000
@@ -93,7 +96,8 @@ services:
     build: ./video-management/video-streaming
     container_name: espacodosaber-video-streaming
     depends_on:
-      - video-storage
+      video-storage:
+        condition: service_healthy
     environment:
       MINIO_ENDPOINT: video-storage
       MINIO_PORT: 9000
@@ -102,6 +106,7 @@ services:
     ports:
       - "1935:1935"
       - "8083:8083"
+      - "5005:5005/udp"
     networks:
       - app-network
   frontend:
@@ -117,11 +122,19 @@ services:
   video-storage:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
     ports:
       - "9000:9000"
       - "9001:9001"
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 volumes:
   postgres_data:
 

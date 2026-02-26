@@ -72,20 +72,41 @@ public class SecurityConfig {
         String[] publicRoutes = {
                 "/api/auth/**",
                 "/api/videos/public",
-                "/api/videos/stream/{id}"
+            "/api/videos/stream/{id}",
+            "/api/videos/stream/active"
         };
         http.securityMatcher(publicRoutes)
             .csrf(csrf -> csrf.disable())
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                    .anyRequest().permitAll()
+                .anyRequest().permitAll()
             );
         return http.build();
     }
 
     @Bean
     @Order(3)
+        public SecurityFilterChain filterChainLiveViewer(HttpSecurity http) throws Exception {
+        String[] liveViewerRoutes = {
+            "/api/videos/stream/live/**"
+        };
+
+        http.securityMatcher(liveViewerRoutes)
+            .csrf(csrf -> csrf.disable())
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .anyRequest().authenticated()
+            );
+
+        http.authenticationProvider(authenticationProvider());
+        http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+        }
+
+        @Bean
+        @Order(4)
     public SecurityFilterChain filterChainAdmin(HttpSecurity http) throws Exception {
         http.securityMatcher("/api/admin/**")
                 .csrf(csrf -> csrf.disable())
@@ -102,13 +123,15 @@ public class SecurityConfig {
     }
 
     @Bean 
-    @Order(4)
+    @Order(5)
     public SecurityFilterChain filterChainTeacher(HttpSecurity http) throws Exception {
         String[] teacherRoutes = {
                 "/api/teacher/**",                
                 "/api/videos/upload",
                 "/api/videos/stream",
-                "/api/videos/stream/{id}"
+            "/api/videos/stream/{id}",
+            "/api/videos/stream/chunk",
+            "/api/videos/stream/end"
         };
         http.securityMatcher(teacherRoutes)
                 .csrf(csrf -> csrf.disable())

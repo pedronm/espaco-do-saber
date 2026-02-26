@@ -9,6 +9,7 @@ export interface Video {
   isLive: boolean;
   isPublic: boolean;
   uploadedAt: Date;
+  streamingUrl: string
 }
 
 export interface VideoRequest {

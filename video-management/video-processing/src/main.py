@@ -4,6 +4,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from minio import Minio
 from minio.error import S3Error
 
@@ -41,12 +42,13 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/videos/upload")
-async def upload_video(file: UploadFile = File(...)) -> dict:
+@app.post("/process-video")
+async def process_video(file: UploadFile = File(...)) -> dict:
+    """Endpoint for Java backend to upload and process videos"""
     if not file.filename:
         raise HTTPException(status_code=400, detail="Missing filename")
 
-    object_name = f"{uuid4()}-{file.filename}"
+    video_info = f"{uuid4()}-{file.filename}"
 
     with tempfile.NamedTemporaryFile(delete=False) as temp_file:
         while True:
@@ -60,7 +62,7 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
     try:
         minio_client.fput_object(
             minio_bucket,
-            object_name,
+            video_info,
             temp_path,
             content_type=file.content_type or "application/octet-stream",
         )
@@ -72,26 +74,93 @@ async def upload_video(file: UploadFile = File(...)) -> dict:
         except OSError:
             pass
 
-    return {"objectName": object_name}
+    return {"videoInfo": video_info}
+
+
+@app.post("/videos/upload")
+async def upload_video(file: UploadFile = File(...)) -> dict:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Missing filename")
+
+    video_info = f"{uuid4()}-{file.filename}"
+
+    with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            temp_file.write(chunk)
+        temp_file.flush()
+        temp_path = temp_file.name
+
+    try:
+        minio_client.fput_object(
+            minio_bucket,
+            video_info,
+            temp_path,
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except S3Error as exc:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {exc}") from exc
+    finally:
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+
+    return {"videoInfo": video_info}
 
 
 @app.get("/videos")
 def list_videos(prefix: str | None = None) -> dict:
     try:
         objects = minio_client.list_objects(minio_bucket, prefix=prefix or "", recursive=True)
-        return {"objects": [obj.object_name for obj in objects]}
+        return {"videos": [obj.object_name for obj in objects]}
     except S3Error as exc:
         raise HTTPException(status_code=500, detail=f"List failed: {exc}") from exc
 
 
-@app.get("/videos/{object_name}")
-def get_video_url(object_name: str) -> dict:
+# @app.get("/videos/{video}")
+
+# def get_video_url(video: str) -> dict:
+#     try:
+#         url = minio_client.presigned_get_object(
+#             minio_bucket,
+#             video,
+#             expires=timedelta(hours=1),
+#         )
+#         return {"url": url}
+#     except S3Error as exc:
+#         raise HTTPException(status_code=500, detail=f"Presign failed: {exc}") from exc
+
+
+@app.get("/videos/{video}")
+def get_video(video: str) -> StreamingResponse:
     try:
-        url = minio_client.presigned_get_object(
-            minio_bucket,
-            object_name,
-            expires=timedelta(hours=1),
-        )
-        return {"url": url}
+        stat = minio_client.stat_object(minio_bucket, video)
     except S3Error as exc:
-        raise HTTPException(status_code=500, detail=f"Presign failed: {exc}") from exc
+        if exc.code == "NoSuchKey":
+            raise HTTPException(status_code=404, detail="Video not found") from exc
+        raise HTTPException(status_code=500, detail=f"Stat failed: {exc}") from exc
+
+    try:
+        obj = minio_client.get_object(minio_bucket, video)
+    except S3Error as exc:
+        if exc.code == "NoSuchKey":
+            raise HTTPException(status_code=404, detail="Video not found") from exc
+        raise HTTPException(status_code=500, detail=f"Get failed: {exc}") from exc
+
+    def _stream() -> bytes:
+        try:
+            for chunk in obj.stream(32 * 1024):
+                yield chunk
+        finally:
+            obj.close()
+            obj.release_conn()
+
+    headers = {
+        "Content-Length": str(stat.size),
+        "Content-Disposition": f'inline; filename="{os.path.basename(video)}"',
+    }
+    media_type = stat.content_type or "application/octet-stream"
+    return StreamingResponse(_stream(), media_type=media_type, headers=headers)
