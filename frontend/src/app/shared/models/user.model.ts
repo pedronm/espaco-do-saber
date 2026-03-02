@@ -16,15 +16,24 @@ export interface RegisterRequest {
   email: string;
   password: string;
   fullName: string;
-  role: 'ADMIN' | 'TEACHER' | 'STUDENT';
+  accessType: 'PUBLICO' | 'ALUNO';
+}
+
+export interface RegisterResponse {
+  message: string;
+  pendingApproval: boolean;
 }
 
 export interface AuthResponse {
   token?: string;
   access_token?: string;
+  refresh_token?: string;
+  obs_stream_key?: string;
+  expires_in?: number;
+  refresh_expires_in?: number;
   type?: string;
   id?: number;
   username?: string;
   email?: string;
-  roles?: [string];
+  roles?: string[];
 }

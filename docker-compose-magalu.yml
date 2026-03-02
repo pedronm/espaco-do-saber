@@ -1,4 +1,11 @@
 services:
+  cloudflaretunnel:
+    container_name: espacodosaber-cloudflared
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    environment: 
+      - TUNNEL_TOKEN=$TUNNEL_TOKEN      
+    command: tunnel --no-autoupdate run
   postgres:
     image: postgres:17-alpine
     container_name: espacodosaber-db

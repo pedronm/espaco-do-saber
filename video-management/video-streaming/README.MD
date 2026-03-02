@@ -31,26 +31,39 @@ MINIO_ACCESS_KEY=minioadmin
 MINIO_SECRET_KEY=minioadmin
 MINIO_BUCKET=videos
 MINIO_SECURE=false
+RTMP_APP=live
+RTMP_PUBLIC_HOST=localhost
+# Optional: comma-separated allowed keys (when set, unknown keys are rejected)
+RTMP_ALLOWED_STREAM_KEYS=sala-101,sala-102
 ```
 
 ### RTMP Usage
 Push a stream (example with FFmpeg):
 
 ```bash
-ffmpeg -re -i /path/to/video.mp4 -c copy -f flv rtmp://localhost:1935/live
+ffmpeg -re -i /path/to/video.mp4 -c copy -f flv rtmp://localhost:1935/live/sala-101
 ```
 
-Play the stream from another client:
+In OBS:
+
+```text
+Server: rtmp://localhost:1935/live
+Stream Key: sala-101
+```
+
+Play the stream from another client (VLC/FFplay):
 
 ```
-rtmp://localhost:1935/live
+rtmp://localhost:1935/live/sala-101
 ```
 
 ### HTTP Endpoints
 ```
 GET /health
 GET /streams
-GET /streams/{key}/object
+GET /obs/config
+GET /streams/{key}/live
+GET /streams/{key}/recording
 ```
 
 ## Project Structure

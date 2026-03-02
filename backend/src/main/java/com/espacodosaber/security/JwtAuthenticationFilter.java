@@ -48,6 +48,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
                 System.out.println("[JWT FILTER] UserDetails loaded: " + userDetails.getUsername());
                 System.out.println("[JWT FILTER] Authorities: " + userDetails.getAuthorities());
+
+                if (!userDetails.isEnabled()) {
+                    System.out.println("[JWT FILTER] User is inactive and cannot authenticate: " + username);
+                    filterChain.doFilter(request, response);
+                    return;
+                }
                 
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());

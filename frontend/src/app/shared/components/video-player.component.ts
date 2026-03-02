@@ -1,63 +1,46 @@
 import { Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { interval, Subscription } from 'rxjs';
+import { Subscription, interval } from 'rxjs';
+import { timeout } from 'rxjs/operators';
 import { Video } from '../models/video.model';
 import { AuthService } from '../services/auth.service';
 import { VideoService } from '../services/video.service';
-import { WebRtcSignalingService } from '../services/webrtc-signaling.service';
-import { environment } from '../../../environments/environment';
+import { StreamGatewayService } from '../services/stream-gateway.service';
+
+interface FlvJsPlayer {
+  attachMediaElement(videoElement: HTMLVideoElement): void;
+  load(): void;
+  play(): Promise<void>;
+  destroy(): void;
+}
+
+interface FlvJsModule {
+  isSupported(): boolean;
+  createPlayer(config: { type: 'flv'; url: string; isLive: boolean }): FlvJsPlayer;
+}
 
 @Component({
   standalone: false,
   selector: 'app-video-player',
   template: `
     <div class="video-player-container">
-      <button class="btn-back" (click)="goBack()">← Back</button>
+      <button class="btn-back" (click)="goBack()">← Voltar</button>
 
       <div class="live-waiting" *ngIf="isLiveRoute && liveStatus === 'ACTIVE'">
-        <p>Transmissão em andamento. O player pode ter alguns segundos de atraso.</p>
-        <p class="refresh-info">Verificando status novamente em {{ secondsToNextCheck }}s</p>
-        <button class="btn-refresh" (click)="refreshLivePlayback()">Atualizar transmissão</button>
-      </div>
-
-      <div class="webrtc-debug" *ngIf="isLiveRoute && showWebRtcDebug">
-        <p><strong>Live Mode:</strong> {{ livePlaybackStrategy }}</p>
-        <p><strong>PC State:</strong> {{ webrtcConnectionState }}</p>
-        <p><strong>ICE State:</strong> {{ webrtcIceConnectionState }}</p>
-        <p><strong>Signal State:</strong> {{ webrtcSignalingState }}</p>
-        <p><strong>Remote Tracks:</strong> {{ webrtcRemoteTrackCount }}</p>
-        <p><strong>Candidate Cursor:</strong> {{ webrtcViewerCandidateSinceId }}</p>
+        <p>Transmissão em andamento.</p>
       </div>
 
       <div class="player-wrapper" *ngIf="video">
         <video
-          *ngIf="isLiveRoute"
           #videoPlayer
           class="video-player"
+          [attr.src]="useNativeSource ? videoSource : null"
           controls
           width="100%"
-          (play)="onVideoPlay()"
-          (pause)="onVideoPause()"
-          (stalled)="onVideoStalled()"
-          (error)="onVideoPlaybackError()"
-          (ended)="onVideoEnded()"
           autoplay>
           Your browser does not support the video tag.
         </video>
-        <video
-          *ngIf="!isLiveRoute"
-          #videoPlayer
-          class="video-player"
-          [src]="video.streamingUrl"
-          controls
-          width="100%"
-          (play)="onVideoPlay()"
-          (pause)="onVideoPause()"
-          (ended)="onVideoEnded()"
-          autoplay>
-          Your browser does not support the video tag.
-        </video>
-        <div class="live-indicator" *ngIf="shouldShowLiveIndicator()">
+        <div class="live-indicator" *ngIf="isLiveRoute && liveStatus === 'ACTIVE'">
           <span class="live-badge">● LIVE</span>
         </div>
       </div>
@@ -65,20 +48,14 @@ import { environment } from '../../../environments/environment';
       <div class="video-details" *ngIf="video">
         <h2>{{ video.title }}</h2>
         <div class="meta-info">
-          <span class="teacher">by {{ video.teacherName }}</span>
-          <span class="date">{{ video.uploadedAt | date }}</span>
-          <span class="badge" [class.live]="shouldShowLiveIndicator()">{{ shouldShowLiveIndicator() ? 'LIVE' : 'RECORDED' }}</span>
+          <span class="teacher">by {{ video.teacherName || 'Sistema' }}</span>
+          <span class="date" *ngIf="video.uploadedAt">{{ video.uploadedAt | date }}</span>
+          <span class="badge" [class.live]="isLiveRoute">{{ isLiveRoute ? 'LIVE' : 'RECORDED' }}</span>
           <span class="badge" [class.public]="video.isPublic">{{ video.isPublic ? 'PUBLIC' : 'PRIVATE' }}</span>
         </div>
         <div class="description">
           <h3>Description</h3>
           <p>{{ video.description || 'No description provided' }}</p>
-        </div>
-        <div class="video-stats">
-          <div class="stat">
-            <span class="stat-label">Duration:</span>
-            <span class="stat-value">{{ formatDuration(video.duration) }}</span>
-          </div>
         </div>
       </div>
 
@@ -91,869 +68,301 @@ import { environment } from '../../../environments/environment';
       </div>
     </div>
   `,
-  styles: [`
-    .video-player-container {
-      max-width: 1000px;
-      margin: 0 auto;
-      padding: 2rem 1rem;
-    }
-
-    .btn-back {
-      display: inline-block;
-      margin-bottom: 1.5rem;
-      padding: 0.5rem 1rem;
-      background: #f0f0f0;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-      cursor: pointer;
-      transition: background 0.3s;
-    }
-
-    .btn-back:hover {
-      background: #e0e0e0;
-    }
-
-    .live-waiting {
-      background: #fff3cd;
-      border: 1px solid #ffeeba;
-      color: #856404;
-      border-radius: 8px;
-      padding: 1rem;
-      margin-bottom: 1rem;
-    }
-
-    .webrtc-debug {
-      background: #f1f5f9;
-      border: 1px solid #cbd5e1;
-      border-radius: 8px;
-      padding: 0.75rem 1rem;
-      margin-bottom: 1rem;
-      color: #334155;
-      font-size: 0.85rem;
-    }
-
-    .webrtc-debug p {
-      margin: 0.2rem 0;
-    }
-
-    .refresh-info {
-      margin-top: 0.5rem;
-      margin-bottom: 0.75rem;
-      font-size: 0.9rem;
-    }
-
-    .btn-refresh {
-      background: #856404;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      padding: 0.4rem 0.8rem;
-      cursor: pointer;
-      font-size: 0.85rem;
-      font-weight: 600;
-    }
-
-    .btn-refresh:hover {
-      opacity: 0.9;
-    }
-
-    .player-wrapper {
-      background: #000;
-      padding: 0;
-      margin-bottom: 2rem;
-      border-radius: 8px;
-      overflow: hidden;
-      position: relative;
-    }
-
-    .video-player {
-      width: 100%;
-      height: auto;
-      display: block;
-    }
-
-    .live-indicator {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      z-index: 10;
-    }
-
-    .live-badge {
-      display: inline-block;
-      padding: 0.5rem 1rem;
-      background: rgba(244, 67, 54, 0.9);
-      color: white;
-      border-radius: 4px;
-      font-weight: 600;
-      font-size: 0.9rem;
-      animation: pulse 1s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.7; }
-    }
-
-    .video-details {
-      background: white;
-      padding: 2rem;
-      border-radius: 8px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    }
-
-    h2 {
-      margin: 0 0 1rem 0;
-      color: #333;
-      font-size: 1.8rem;
-    }
-
-    .meta-info {
-      display: flex;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .teacher {
-      color: #666;
-      font-size: 0.95rem;
-    }
-
-    .date {
-      color: #999;
-      font-size: 0.9rem;
-    }
-
-    .badge {
-      display: inline-block;
-      padding: 0.25rem 0.75rem;
-      background: #e0e0e0;
-      color: #555;
-      border-radius: 4px;
-      font-size: 0.8rem;
-      font-weight: 600;
-    }
-
-    .badge.live {
-      background: #f44336;
-      color: white;
-    }
-
-    .badge.public {
-      background: #4caf50;
-      color: white;
-    }
-
-    .description {
-      margin-bottom: 2rem;
-      padding-bottom: 2rem;
-      border-bottom: 1px solid #eee;
-    }
-
-    .description h3 {
-      margin: 0 0 0.5rem 0;
-      color: #555;
-      font-size: 1rem;
-    }
-
-    .description p {
-      margin: 0;
-      color: #666;
-      line-height: 1.6;
-    }
-
-    .video-stats {
-      display: flex;
-      gap: 2rem;
-    }
-
-    .stat {
-      display: flex;
-      gap: 0.5rem;
-    }
-
-    .stat-label {
-      font-weight: 600;
-      color: #555;
-    }
-
-    .stat-value {
-      color: #666;
-    }
-
-    .loading {
-      text-align: center;
-      padding: 2rem;
-      color: #666;
-    }
-
-    .error {
-      background: #ffebee;
-      color: #c62828;
-      padding: 1.5rem;
-      border-radius: 4px;
-      margin: 1rem 0;
-    }
-
-    @media (max-width: 768px) {
-      .video-player-container {
-        padding: 1rem;
-      }
-
-      h2 {
-        font-size: 1.4rem;
-      }
-
-      .meta-info {
-        flex-direction: column;
-        align-items: flex-start;
-      }
-
-      .video-stats {
-        flex-direction: column;
-        gap: 1rem;
-      }
-    }
-  `]
+  styles: [``]
 })
 export class VideoPlayerComponent implements OnInit, OnDestroy {
-  @ViewChild('videoPlayer') videoPlayer!: ElementRef<HTMLVideoElement>;
+  @ViewChild('videoPlayer') videoPlayerRef?: ElementRef<HTMLVideoElement>;
 
   video: Video | null = null;
-  loading = false;
-  error: string | null = null;
-  videoId: number | null = null;
-  liveId: string | null = null;
+  videoSource: string = '';
+  useNativeSource = true;
+  loading = true;
+  error = '';
   isLiveRoute = false;
-  liveStatus: 'ACTIVE' | 'COMPLETED' | 'NOT_FOUND' | null = null;
-  secondsToNextCheck = 3;
+  liveStatus: 'ACTIVE' | 'COMPLETED' | 'NOT_FOUND' = 'NOT_FOUND';
+  liveId: string = '';
 
-  private liveStatusPolling: Subscription | null = null;
-  private liveBlobPolling: Subscription | null = null;
-  private liveRecordingObjectUrl: string | null = null;
-  private usingRecordingFallback = false;
-  private lastRecoveryAt = 0;
-  private lastLiveBlobSize = 0;
-  private isUpdatingLiveSource = false;
-  readonly livePlaybackStrategy = environment.livePlaybackStrategy;
-  readonly showWebRtcDebug = !environment.production;
-  private readonly webrtcIceServers = environment.webrtcIceServers || [];
-  private webrtcPeerConnection: RTCPeerConnection | null = null;
-  private webrtcOfferPolling: Subscription | null = null;
-  private webrtcCandidatePolling: Subscription | null = null;
-  webrtcViewerCandidateSinceId = 0;
-  private webrtcNegotiationTimeout: ReturnType<typeof setTimeout> | null = null;
-  private webrtcRemoteStream: MediaStream | null = null;
-  private savedRecordingObjectUrl: string | null = null;
-  webrtcConnectionState = 'idle';
-  webrtcIceConnectionState = 'new';
-  webrtcSignalingState = 'stable';
-  webrtcRemoteTrackCount = 0;
+  private statusSubscription?: Subscription;
+  private flvPlayer?: FlvJsPlayer;
+  private playbackTimeoutId?: ReturnType<typeof setTimeout>;
+  private readonly playbackTimeoutMs = 15000;
 
   constructor(
     private route: ActivatedRoute,
     private router: Router,
-    private videoService: VideoService,
     private authService: AuthService,
-    private webrtcSignalingService: WebRtcSignalingService
+    private videoService: VideoService,
+    private streamGatewayService: StreamGatewayService
   ) {}
 
   ngOnInit(): void {
-    this.route.params.subscribe(params => {
-      const idParam = params['id'];
-      this.videoId = idParam ? Number(idParam) : null;
-      this.liveId = params['liveId'];
+    const id = this.route.snapshot.paramMap.get('id');
+    const liveId = this.route.snapshot.paramMap.get('liveId');
 
-      if (this.liveId) {
-        this.isLiveRoute = true;
-        this.loadLiveStream(this.liveId);
-        return;
-      }
+    if (liveId) {
+      this.isLiveRoute = true;
+      this.loadLiveVideo(liveId);
+      return;
+    }
 
-      this.isLiveRoute = false;
-      this.stopLiveStatusPolling();
-      this.stopWebRtcViewerSession();
-      this.cleanupSavedRecordingObjectUrl();
+    if (!id) {
+      this.loading = false;
+      this.error = 'Video not found';
+      return;
+    }
 
-      if (this.videoId && Number.isFinite(this.videoId) && this.videoId > 0) {
-        this.loadVideo(this.videoId);
+    this.loadRecordedVideo(Number(id));
+  }
+
+  ngOnDestroy(): void {
+    this.statusSubscription?.unsubscribe();
+    this.clearPlaybackTimeout();
+    this.destroyFlvPlayer();
+  }
+
+  goBack(): void {
+    if (this.authService.hasRole('ADMIN')) {
+      this.router.navigate(['/admin']);
+      return;
+    }
+
+    if (this.authService.hasRole('TEACHER')) {
+      this.router.navigate(['/teacher']);
+      return;
+    }
+
+    if (this.authService.hasRole('STUDENT')) {
+      this.router.navigate(['/student']);
+      return;
+    }
+
+    this.router.navigate(['/home']);
+  }
+
+  private loadRecordedVideo(id: number): void {
+    this.videoService.getVideo(id).pipe(timeout(10000)).subscribe({
+      next: (video) => {
+        this.video = video;
+        this.videoSource = this.resolveVideoUrl(video.streamingUrl);
+        this.loading = false;
+        this.debug('Recorded video loaded', {
+          id: video.id,
+          wasLive: video.wasLive,
+          rawUrl: video.streamingUrl,
+          resolvedUrl: this.videoSource
+        });
+
+        setTimeout(() => this.setupRecordedPlayback(), 0);
+        this.videoService.trackVideoAccess(video.id).subscribe();
+      },
+      error: (err) => {
+        this.loading = false;
+        this.debug('Failed to load video metadata', { id, error: err });
+        this.error = 'Falha ao carregar metadados do vídeo (timeout/erro de rede).';
       }
     });
   }
 
-  ngOnDestroy(): void {
-    this.destroyLiveHlsInstance();
-    this.stopLiveStatusPolling();
-    this.stopLiveBlobPolling();
-    this.stopWebRtcViewerSession();
-    this.cleanupSavedRecordingObjectUrl();
-  }
-
-  loadLiveStream(liveId: string): void {
-    this.loading = false;
-    this.error = null;
-    this.liveStatus = 'ACTIVE';
-
+  private loadLiveVideo(liveId: string): void {
+    this.liveId = liveId;
     this.video = {
       id: 0,
-      title: 'Transmissão ao vivo',
-      description: 'Transmissão ativa em andamento',
+      title: `Live ${liveId}`,
+      description: 'Transmissão ao vivo via OBS',
       teacherId: 0,
-      teacherName: 'Ao vivo',
+      teacherName: 'OBS',
       duration: 0,
       isLive: true,
       isPublic: true,
       uploadedAt: new Date(),
-      streamingUrl: this.buildLiveHlsManifestUrl(liveId)
+      streamingUrl: this.streamGatewayService.getLiveFlvUrl(liveId)
     };
 
-    this.lastLiveBlobSize = 0;
-    this.startLiveStatusPolling(liveId);
-    this.startLiveBlobPolling();
-    setTimeout(() => this.initializeLivePlayback(), 0);
-  }
+    this.videoSource = this.resolveVideoUrl(this.streamGatewayService.getLiveFlvUrl(liveId));
+    this.debug('Live route detected', { liveId, liveFlvUrl: this.videoSource });
+    this.loading = false;
 
-  loadVideo(id: number): void {
-    this.loading = true;
-    this.error = null;
-
-    this.videoService.getVideo(id).subscribe({
-      next: (video) => {
-        this.cleanupSavedRecordingObjectUrl();
-        this.video = video;
-        this.loading = false;
-
-        if (this.isSavedLiveRecordingUrl(video.streamingUrl)) {
-          this.loadSavedRecordingWithAuth(video.streamingUrl);
-        }
-      },
-      error: (error) => {
-        this.error = error.error?.message || 'Failed to load video. Please try again.';
-        this.loading = false;
-      }
-    });
-  }
-
-  private startLiveStatusPolling(liveId: string): void {
-    this.stopLiveStatusPolling();
-    this.secondsToNextCheck = 3;
-    this.checkLiveStatus(liveId);
-
-    this.liveStatusPolling = interval(1000).subscribe(() => {
-      this.secondsToNextCheck -= 1;
-      if (this.secondsToNextCheck <= 0) {
-        this.checkLiveStatus(liveId);
-        this.secondsToNextCheck = 3;
-      }
-    });
-  }
-
-  private checkLiveStatus(liveId: string): void {
-    this.videoService.getLiveStreamStatus(liveId).subscribe({
+    this.videoService.getLiveStreamStatus(liveId).pipe(timeout(10000)).subscribe({
       next: (status) => {
         this.liveStatus = status.status;
-
-        if (status.status === 'COMPLETED' && status.videoId) {
-          this.stopLiveStatusPolling();
-          this.stopLiveBlobPolling();
-          this.stopWebRtcViewerSession();
-          this.router.navigate(['/video', status.videoId]);
-          return;
-        }
-
-        if (status.status === 'NOT_FOUND') {
-          this.error = 'Transmissão não encontrada.';
-        }
-      },
-      error: () => {
-        this.error = 'Falha ao verificar status da transmissão.';
-      }
-    });
-  }
-
-  private stopLiveStatusPolling(): void {
-    if (this.liveStatusPolling) {
-      this.liveStatusPolling.unsubscribe();
-      this.liveStatusPolling = null;
-    }
-  }
-
-  private startLiveBlobPolling(): void {
-    this.stopLiveBlobPolling();
-    this.liveBlobPolling = interval(3000).subscribe(() => {
-      if (!this.isLiveRoute || this.liveStatus !== 'ACTIVE' || !this.liveId || !this.videoPlayer?.nativeElement) {
-        return;
-      }
-
-      this.loadLiveRecordingFallback(this.liveId, this.videoPlayer.nativeElement, false);
-    });
-  }
-
-  private stopLiveBlobPolling(): void {
-    if (this.liveBlobPolling) {
-      this.liveBlobPolling.unsubscribe();
-      this.liveBlobPolling = null;
-    }
-  }
-
-  refreshLivePlayback(liveId?: string): void {
-    if (!this.video) {
-      return;
-    }
-
-    const activeLiveId = liveId ?? this.liveId;
-    if (!activeLiveId) {
-      return;
-    }
-
-    this.video.streamingUrl = this.buildLiveHlsManifestUrl(activeLiveId);
-    this.initializeLivePlayback();
-  }
-
-  private initializeLivePlayback(): void {
-    if (!this.isLiveRoute || !this.video || !this.videoPlayer?.nativeElement) {
-      return;
-    }
-
-    const videoElement = this.videoPlayer.nativeElement;
-    this.usingRecordingFallback = false;
-
-    this.destroyLiveHlsInstance();
-    this.stopWebRtcViewerSession();
-
-    if (this.liveId) {
-      if (this.livePlaybackStrategy === 'webrtc') {
-        const webrtcStarted = this.tryInitializeWebRtcPlayback(this.liveId, videoElement);
-        if (webrtcStarted) {
-          return;
-        }
-        console.warn('[LIVE_PLAYER] WebRTC initialization failed, falling back to blob mode.');
-      } else if (this.livePlaybackStrategy !== 'blob') {
-        console.warn(`[LIVE_PLAYER] Unsupported strategy "${this.livePlaybackStrategy}", falling back to blob mode.`);
-      }
-      this.loadLiveRecordingFallback(this.liveId, videoElement, true);
-    }
-  }
-
-  private tryInitializeWebRtcPlayback(liveId: string, videoElement: HTMLVideoElement): boolean {
-    if (typeof RTCPeerConnection === 'undefined') {
-      console.warn('[LIVE_PLAYER][WEBRTC] RTCPeerConnection unavailable in this browser.');
-      return false;
-    }
-
-    console.info('[LIVE_PLAYER][WEBRTC] starting viewer session', {
-      liveId,
-      iceServers: this.webrtcIceServers
-    });
-
-    this.stopLiveBlobPolling();
-    this.stopWebRtcViewerSession();
-    this.webrtcViewerCandidateSinceId = 0;
-
-    const connection = new RTCPeerConnection({
-      iceServers: this.webrtcIceServers
-    });
-    this.webrtcPeerConnection = connection;
-    this.webrtcConnectionState = connection.connectionState;
-    this.webrtcIceConnectionState = connection.iceConnectionState;
-    this.webrtcSignalingState = connection.signalingState;
-    this.webrtcRemoteTrackCount = 0;
-
-    this.webrtcRemoteStream = new MediaStream();
-    videoElement.srcObject = this.webrtcRemoteStream;
-
-    connection.addTransceiver('video', { direction: 'recvonly' });
-    connection.addTransceiver('audio', { direction: 'recvonly' });
-
-    connection.ontrack = (event) => {
-      event.streams.forEach((stream) => {
-        stream.getTracks().forEach((track) => {
-          if (!this.webrtcRemoteStream?.getTracks().some(t => t.id === track.id)) {
-            this.webrtcRemoteStream?.addTrack(track);
-          }
-        });
-      });
-
-      this.webrtcRemoteTrackCount = this.webrtcRemoteStream?.getTracks().length || 0;
-
-      if (videoElement.paused) {
-        void videoElement.play().catch(() => undefined);
-      }
-
-      console.info('[LIVE_PLAYER][WEBRTC] remote track received', {
-        liveId,
-        remoteTrackCount: this.webrtcRemoteTrackCount
-      });
-    };
-
-    connection.onicecandidate = (event) => {
-      if (!event.candidate) {
-        return;
-      }
-
-      this.webrtcSignalingService.postCandidate(liveId, 'viewer', event.candidate).subscribe({
-        next: (response) => {
-          console.debug('[LIVE_PLAYER][WEBRTC] local candidate posted', response);
-        },
-        error: (error) => {
-          console.error('[LIVE_PLAYER][WEBRTC] failed posting local candidate', error);
-        }
-      });
-    };
-
-    connection.onconnectionstatechange = () => {
-      const state = connection.connectionState;
-      this.webrtcConnectionState = state;
-      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
-        this.fallbackToBlobFromWebRtc(liveId, videoElement);
-      }
-    };
-
-    connection.oniceconnectionstatechange = () => {
-      this.webrtcIceConnectionState = connection.iceConnectionState;
-      console.info('[LIVE_PLAYER][WEBRTC] ice connection state', connection.iceConnectionState);
-    };
-
-    connection.onsignalingstatechange = () => {
-      this.webrtcSignalingState = connection.signalingState;
-      console.info('[LIVE_PLAYER][WEBRTC] signaling state', connection.signalingState);
-    };
-
-    this.startWebRtcOfferPolling(liveId, connection, videoElement);
-    this.startWebRtcCandidatePolling(liveId, connection);
-
-    if (this.webrtcNegotiationTimeout) {
-      clearTimeout(this.webrtcNegotiationTimeout);
-      this.webrtcNegotiationTimeout = null;
-    }
-    this.webrtcNegotiationTimeout = setTimeout(() => {
-      if (this.webrtcPeerConnection === connection && connection.connectionState !== 'connected') {
-        this.fallbackToBlobFromWebRtc(liveId, videoElement);
-      }
-    }, 12000);
-
-    return true;
-  }
-
-  private startWebRtcOfferPolling(liveId: string, connection: RTCPeerConnection, videoElement: HTMLVideoElement): void {
-    this.stopWebRtcOfferPolling();
-
-    this.webrtcOfferPolling = interval(1000).subscribe(() => {
-      if (this.webrtcPeerConnection !== connection || connection.currentRemoteDescription) {
-        return;
-      }
-
-      this.webrtcSignalingService.getOffer(liveId).subscribe({
-        next: (offer) => {
-          if (!offer.available || !offer.sdp) {
-            return;
-          }
-
-          console.info('[LIVE_PLAYER][WEBRTC] remote offer received');
-
-          void connection.setRemoteDescription({ type: 'offer', sdp: offer.sdp })
-            .then(() => connection.createAnswer())
-            .then((answer) => connection.setLocalDescription(answer).then(() => answer))
-            .then((answer) => this.webrtcSignalingService.postAnswer(liveId, answer).subscribe({
-              next: () => {
-                console.info('[LIVE_PLAYER][WEBRTC] local answer posted');
-                this.stopWebRtcOfferPolling();
-              },
-              error: () => this.fallbackToBlobFromWebRtc(liveId, videoElement)
-            }))
-            .catch(() => this.fallbackToBlobFromWebRtc(liveId, videoElement));
-        },
-        error: () => undefined
-      });
-    });
-  }
-
-  private startWebRtcCandidatePolling(liveId: string, connection: RTCPeerConnection): void {
-    this.stopWebRtcCandidatePolling();
-
-    this.webrtcCandidatePolling = interval(1000).subscribe(() => {
-      if (this.webrtcPeerConnection !== connection) {
-        return;
-      }
-
-      this.webrtcSignalingService.getCandidates(liveId, 'viewer', this.webrtcViewerCandidateSinceId).subscribe({
-        next: (response) => {
-          if (response.nextSinceId > this.webrtcViewerCandidateSinceId) {
-            this.webrtcViewerCandidateSinceId = response.nextSinceId;
-          }
-
-          response.items.forEach((item) => {
-            if (!item.candidate) {
-              return;
-            }
-
-            console.debug('[LIVE_PLAYER][WEBRTC] applying remote ICE candidate', item.id);
-            void connection.addIceCandidate({
-              candidate: item.candidate,
-              sdpMid: item.sdpMid,
-              sdpMLineIndex: item.sdpMLineIndex
-            }).catch(() => undefined);
-          });
-        },
-        error: () => undefined
-      });
-    });
-  }
-
-  private stopWebRtcOfferPolling(): void {
-    if (this.webrtcOfferPolling) {
-      this.webrtcOfferPolling.unsubscribe();
-      this.webrtcOfferPolling = null;
-    }
-  }
-
-  private stopWebRtcCandidatePolling(): void {
-    if (this.webrtcCandidatePolling) {
-      this.webrtcCandidatePolling.unsubscribe();
-      this.webrtcCandidatePolling = null;
-    }
-  }
-
-  private stopWebRtcViewerSession(): void {
-    this.stopWebRtcOfferPolling();
-    this.stopWebRtcCandidatePolling();
-
-    if (this.webrtcNegotiationTimeout) {
-      clearTimeout(this.webrtcNegotiationTimeout);
-      this.webrtcNegotiationTimeout = null;
-    }
-
-    if (this.webrtcPeerConnection) {
-      this.webrtcPeerConnection.onicecandidate = null;
-      this.webrtcPeerConnection.ontrack = null;
-      this.webrtcPeerConnection.onconnectionstatechange = null;
-      this.webrtcPeerConnection.oniceconnectionstatechange = null;
-      this.webrtcPeerConnection.onsignalingstatechange = null;
-      this.webrtcPeerConnection.close();
-      this.webrtcPeerConnection = null;
-    }
-
-    this.webrtcRemoteStream?.getTracks().forEach((track) => track.stop());
-    this.webrtcRemoteStream = null;
-
-    if (this.videoPlayer?.nativeElement) {
-      this.videoPlayer.nativeElement.srcObject = null;
-    }
-
-    this.webrtcConnectionState = 'closed';
-    this.webrtcIceConnectionState = 'closed';
-    this.webrtcSignalingState = 'closed';
-    this.webrtcRemoteTrackCount = 0;
-  }
-
-  private fallbackToBlobFromWebRtc(liveId: string, videoElement: HTMLVideoElement): void {
-    console.warn('[LIVE_PLAYER][WEBRTC] fallback to blob mode', { liveId });
-    this.stopWebRtcViewerSession();
-    this.startLiveBlobPolling();
-    this.loadLiveRecordingFallback(liveId, videoElement, true);
-  }
-
-  private loadLiveRecordingFallback(liveId: string, videoElement: HTMLVideoElement, forceSwap: boolean): void {
-    if (this.isUpdatingLiveSource) {
-      return;
-    }
-
-    this.isUpdatingLiveSource = true;
-    this.usingRecordingFallback = true;
-    const previousTime = Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0;
-    const wasPaused = videoElement.paused;
-
-    this.videoService.getLiveRecordingBlob(liveId).subscribe({
-      next: (blob) => {
-        console.debug('[LIVE_FALLBACK] blob received', { liveId, size: blob.size, type: blob.type });
-
-        const hasGrown = blob.size > this.lastLiveBlobSize;
-        if (!forceSwap && !hasGrown) {
-          this.isUpdatingLiveSource = false;
-          return;
-        }
-
-        const duration = Number.isFinite(videoElement.duration) ? videoElement.duration : 0;
-        const currentTime = Number.isFinite(videoElement.currentTime) ? videoElement.currentTime : 0;
-        const remaining = duration > 0 ? (duration - currentTime) : 0;
-        const isNearLiveEdge = duration > 0 && remaining <= 0.8;
-        const shouldSwapNow = forceSwap || videoElement.paused || isNearLiveEdge;
-
-        if (!shouldSwapNow) {
-          this.isUpdatingLiveSource = false;
-          return;
-        }
-
-        this.lastLiveBlobSize = blob.size;
-
-        if (this.liveRecordingObjectUrl) {
-          URL.revokeObjectURL(this.liveRecordingObjectUrl);
-          this.liveRecordingObjectUrl = null;
-        }
-
-        const objectUrl = URL.createObjectURL(blob);
-        this.liveRecordingObjectUrl = objectUrl;
-        this.video!.streamingUrl = objectUrl;
-        videoElement.src = objectUrl;
-
-        const restorePlayback = () => {
-          const newDuration = Number.isFinite(videoElement.duration) ? videoElement.duration : 0;
-          if (newDuration > 0 && previousTime > 0) {
-            const safeTime = Math.min(previousTime, Math.max(0, newDuration - 0.25));
-            if (safeTime > 0) {
-              videoElement.currentTime = safeTime;
-            }
-          }
-
-          if (!wasPaused) {
-            void videoElement.play().catch(() => undefined);
-          }
-
-          videoElement.removeEventListener('loadedmetadata', restorePlayback);
-          videoElement.removeEventListener('canplay', restorePlayback);
-          this.isUpdatingLiveSource = false;
-        };
-
-        videoElement.addEventListener('loadedmetadata', restorePlayback);
-        videoElement.addEventListener('canplay', restorePlayback);
-        videoElement.load();
+        this.debug('Initial live status', { liveId, status: this.liveStatus });
+        this.setupLivePlayback();
       },
       error: (err) => {
-        console.error('[LIVE_FALLBACK] failed to load recording blob', { liveId, err });
-        this.error = 'Falha ao carregar fallback da gravação ao vivo.';
-        this.isUpdatingLiveSource = false;
+        this.debug('Failed to check live status', { liveId, error: err });
+        this.error = 'Falha ao consultar status da transmissão.';
       }
     });
-  }
 
-  private destroyLiveHlsInstance(): void {
-    if (this.liveRecordingObjectUrl) {
-      URL.revokeObjectURL(this.liveRecordingObjectUrl);
-      this.liveRecordingObjectUrl = null;
-    }
-
-    if (this.videoPlayer?.nativeElement) {
-      this.videoPlayer.nativeElement.removeAttribute('src');
-      this.videoPlayer.nativeElement.load();
-    }
-  }
-
-  private isSavedLiveRecordingUrl(url: string | undefined): boolean {
-    if (!url) {
-      return false;
-    }
-
-    return url.includes('/api/videos/stream/live/') && url.includes('/recording');
-  }
-
-  private loadSavedRecordingWithAuth(url: string): void {
-    this.videoService.getProtectedMediaBlob(url).subscribe({
-      next: (blob) => {
-        this.cleanupSavedRecordingObjectUrl();
-        const objectUrl = URL.createObjectURL(blob);
-        this.savedRecordingObjectUrl = objectUrl;
-
-        if (this.video) {
-          this.video.streamingUrl = objectUrl;
+    this.statusSubscription = interval(10000).subscribe(() => {
+      this.videoService.getLiveStreamStatus(liveId).subscribe({
+        next: (status) => {
+          const previous = this.liveStatus;
+          this.liveStatus = status.status;
+          this.debug('Polled live status', { liveId, previous, current: this.liveStatus });
+          if (previous !== this.liveStatus) {
+            this.setupLivePlayback();
+          }
+        },
+        error: (err) => {
+          this.debug('Live status polling failed', { liveId, error: err });
         }
-      },
-      error: () => {
-        this.error = 'Falha ao carregar gravação salva com autenticação.';
+      });
+    });
+  }
+
+  private setupLivePlayback(): void {
+    this.destroyFlvPlayer();
+
+    if (this.liveStatus === 'ACTIVE') {
+      this.useNativeSource = false;
+      this.debug('Configuring LIVE FLV playback', { liveId: this.liveId, url: this.videoSource });
+      this.setupFlvPlayback();
+      return;
+    }
+
+    this.useNativeSource = true;
+    this.videoSource = this.resolveVideoUrl(this.streamGatewayService.getRecordingUrl(this.liveId));
+    this.debug('Live ended, switching to recording URL', { liveId: this.liveId, recordingUrl: this.videoSource });
+    setTimeout(() => this.setupRecordedPlayback(), 0);
+  }
+
+  private setupRecordedPlayback(): void {
+    this.destroyFlvPlayer();
+
+    if (!this.videoSource) {
+      this.useNativeSource = true;
+      return;
+    }
+
+    const lowerSource = this.videoSource.toLowerCase();
+    const isFlvRecording =
+      lowerSource.includes('/recording') ||
+      lowerSource.endsWith('.flv') ||
+      !!this.video?.wasLive;
+
+    if (!isFlvRecording) {
+      this.useNativeSource = true;
+      const element = this.videoPlayerRef?.nativeElement;
+      if (element) {
+        this.attachPlaybackDiagnostics(element, this.videoSource, 'native');
+        this.startPlaybackTimeout('native', this.videoSource);
       }
-    });
-  }
-
-  private cleanupSavedRecordingObjectUrl(): void {
-    if (this.savedRecordingObjectUrl) {
-      URL.revokeObjectURL(this.savedRecordingObjectUrl);
-      this.savedRecordingObjectUrl = null;
-    }
-  }
-
-  private buildLiveHlsManifestUrl(liveId: string): string {
-    return `/api/videos/stream/live/${liveId}/recording?t=${Date.now()}`;
-  }
-
-  onVideoPlay(): void {}
-
-  onVideoPause(): void {}
-
-  onVideoStalled(): void {
-    this.tryRecoverLivePlayback();
-  }
-
-  onVideoPlaybackError(): void {
-    this.tryRecoverLivePlayback();
-  }
-
-  private tryRecoverLivePlayback(): void {
-    if (!this.isLiveRoute || !this.liveId) {
+      this.debug('Using native playback', { url: this.videoSource, isFlvRecording });
       return;
     }
 
-    const now = Date.now();
-    if (now - this.lastRecoveryAt < 4000) {
+    this.useNativeSource = false;
+    this.debug('Using FLV playback for recorded stream', { url: this.videoSource, isFlvRecording });
+    this.setupFlvPlayback(false, this.videoSource);
+  }
+
+  private async setupFlvPlayback(isLive = true, sourceUrl?: string, attempt = 0): Promise<void> {
+    const videoElement = this.videoPlayerRef?.nativeElement;
+    if (!videoElement) {
+      if (attempt < 8) {
+        setTimeout(() => this.setupFlvPlayback(isLive, sourceUrl, attempt + 1), 120);
+      } else {
+        this.error = 'Player de vídeo não inicializou corretamente.';
+        this.debug('Video element not available after retries', { isLive, sourceUrl });
+      }
       return;
     }
-    this.lastRecoveryAt = now;
 
-    if (this.usingRecordingFallback && this.videoPlayer?.nativeElement) {
-      this.loadLiveRecordingFallback(this.liveId, this.videoPlayer.nativeElement, false);
+    try {
+      const module = await import('flv.js');
+      const flvjs = (module.default || module) as unknown as FlvJsModule;
+      if (!flvjs?.isSupported?.()) {
+        this.error = 'Seu navegador não suporta reprodução ao vivo FLV.';
+        this.debug('flv.js not supported in current browser');
+        return;
+      }
+
+      const resolvedUrl = this.resolveVideoUrl(sourceUrl || this.streamGatewayService.getLiveFlvUrl(this.liveId));
+      this.attachPlaybackDiagnostics(videoElement, resolvedUrl, isLive ? 'flv-live' : 'flv-recording');
+      this.startPlaybackTimeout(isLive ? 'flv-live' : 'flv-recording', resolvedUrl);
+
+      this.flvPlayer = flvjs.createPlayer({
+        type: 'flv',
+        url: resolvedUrl,
+        isLive
+      });
+      this.flvPlayer.attachMediaElement(videoElement);
+      this.flvPlayer.load();
+      await this.flvPlayer.play();
+      this.debug('FLV playback started', { mode: isLive ? 'live' : 'recorded', url: resolvedUrl });
+    } catch (err) {
+      this.error = 'Falha ao carregar a transmissão (FLV).';
+      this.debug('FLV playback failed', { mode: isLive ? 'live' : 'recorded', sourceUrl, error: err });
+    }
+  }
+
+  private destroyFlvPlayer(): void {
+    if (!this.flvPlayer) {
       return;
     }
 
-    this.refreshLivePlayback(this.liveId);
+    this.flvPlayer.destroy();
+    this.flvPlayer = undefined;
   }
 
-  onVideoEnded(): void {
-    if (this.isLiveRoute && this.liveStatus === 'ACTIVE') {
-      this.tryRecoverLivePlayback();
+  private resolveVideoUrl(url: string | undefined): string {
+    if (!url) {
+      return '';
+    }
+
+    try {
+      const resolved = new URL(url, window.location.origin).toString();
+      return resolved;
+    } catch {
+      this.debug('Invalid URL received from API/player source', { url });
+      return url;
     }
   }
 
-  formatDuration(seconds: number | null | undefined): string {
-    if (!seconds || seconds === 0) {
-      return 'Unknown';
-    }
-
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-
-    if (hours > 0) {
-      return `${hours}h ${minutes}m ${secs}s`;
-    }
-
-    if (minutes > 0) {
-      return `${minutes}m ${secs}s`;
-    }
-
-    return `${secs}s`;
+  private attachPlaybackDiagnostics(videoElement: HTMLVideoElement, url: string, mode: 'native' | 'flv-live' | 'flv-recording'): void {
+    videoElement.onloadedmetadata = () => this.debug('Video metadata loaded', { mode, url, duration: videoElement.duration });
+    videoElement.onloadeddata = () => this.debug('Video data loaded', { mode, url });
+    videoElement.onplaying = () => {
+      this.debug('Video playing', { mode, url });
+      this.clearPlaybackTimeout();
+    };
+    videoElement.onwaiting = () => this.debug('Video waiting/buffering', { mode, url });
+    videoElement.onstalled = () => this.debug('Video stalled', { mode, url });
+    videoElement.onerror = () => {
+      const mediaError = videoElement.error;
+      this.debug('Video element error', {
+        mode,
+        url,
+        code: mediaError?.code,
+        message: mediaError?.message
+      });
+    };
   }
 
-  goBack(): void {
-    const targetRoute = this.resolveDashboardRoute();
-    this.router.navigateByUrl(targetRoute, { replaceUrl: true }).catch(() => {
-      window.location.assign(targetRoute);
-    });
+  private startPlaybackTimeout(mode: string, url: string): void {
+    this.clearPlaybackTimeout();
+    this.playbackTimeoutId = setTimeout(() => {
+      this.error = 'Tempo limite ao iniciar reprodução. Verifique a URL/stream no console.';
+      this.debug('Playback timeout reached', { mode, url, timeoutMs: this.playbackTimeoutMs });
+    }, this.playbackTimeoutMs);
   }
 
-  shouldShowLiveIndicator(): boolean {
-    return this.isLiveRoute && this.liveStatus === 'ACTIVE';
-  }
-
-  private resolveDashboardRoute(): string {
-    if (this.authService.hasRole('ADMIN')) {
-      return '/admin';
+  private clearPlaybackTimeout(): void {
+    if (!this.playbackTimeoutId) {
+      return;
     }
 
-    if (this.authService.hasRole('TEACHER')) {
-      return '/teacher';
-    }
-
-    return '/student';
+    clearTimeout(this.playbackTimeoutId);
+    this.playbackTimeoutId = undefined;
   }
 
+  private debug(message: string, details?: unknown): void {
+    if (details !== undefined) {
+      console.log('[VideoPlayer Debug]', message, details);
+      return;
+    }
+
+    console.log('[VideoPlayer Debug]', message);
+  }
 }

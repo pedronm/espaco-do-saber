@@ -12,18 +12,18 @@ import { LoginRequest } from '../../shared/models/user.model';
         <h2>Login - Espaço do Saber</h2>
         <form (ngSubmit)="onSubmit()">
           <div class="form-group">
-            <label>Username</label>
+            <label>Login</label>
             <input type="text" [(ngModel)]="credentials.username" name="username" required>
           </div>
           <div class="form-group">
-            <label>Password</label>
+            <label>Senha</label>
             <input type="password" [(ngModel)]="credentials.password" name="password" required>
           </div>
           <button type="submit" class="btn-primary">Login</button>
           <div class="error" *ngIf="error">{{ error }}</div>
         </form>
         <p class="register-link">
-          Don't have an account? <a [routerLink]="['/register']">Register here</a>
+          Cadastre-se <a [routerLink]="['/register']">aqui</a>
         </p>
       </div>
     </div>

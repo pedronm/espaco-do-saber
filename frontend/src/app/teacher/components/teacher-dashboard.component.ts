@@ -1,7 +1,10 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
+import { StreamGatewayService } from '../../shared/services/stream-gateway.service';
+import { AuthService } from '../../shared/services/auth.service';
+import { Subscription } from 'rxjs';
 
 @Component({
   standalone: false,
@@ -13,7 +16,23 @@ import { Video } from '../../shared/models/video.model';
     </div>
     <div class="teacher-dashboard">
       <h2>Painel do Professor</h2>
-      <app-live-stream-list title="Transmissões em andamento"></app-live-stream-list>
+      <div class="obs-section">
+        <h3>Servidor OBS (campo Server)</h3>
+        <p class="obs-endpoint">{{ obsServerUrl }}</p>
+        <h3>Stream Key</h3>
+        <p class="obs-endpoint">{{ obsStreamKey }}</p>
+        <p class="obs-help">No OBS use o serviço "Custom", com Server e Stream Key em campos separados.</p>
+        <button class="btn-primary" type="button" (click)="regenerateStreamKey()">Gerar nova chave</button>
+      </div>
+      <div class="obs-section">
+        <h3>Transmissões ativas</h3>
+        <p *ngIf="activeLiveStreams.length === 0">Nenhuma transmissão ativa no momento.</p>
+        <div class="live-grid" *ngIf="activeLiveStreams.length > 0">
+          <button class="live-item" *ngFor="let liveId of activeLiveStreams" (click)="watchLive(liveId)">
+            Assistir transmissão {{ liveId }}
+          </button>
+        </div>
+      </div>
       <div class="upload-section">
         <h3>Enviar Novo Vídeo</h3>
         <form (ngSubmit)="onUpload()">
@@ -33,12 +52,6 @@ import { Video } from '../../shared/models/video.model';
             <label>
               <input type="checkbox" [(ngModel)]="isPublic" name="isPublic">
               Tornar Público
-            </label>
-          </div>
-          <div class="form-group">
-            <label>
-              <input type="checkbox" [(ngModel)]="isLive" name="isLive">
-              Transmissão Ao Vivo
             </label>
           </div>
           <button type="submit" class="btn-primary" [disabled]="uploading">
@@ -102,6 +115,42 @@ import { Video } from '../../shared/models/video.model';
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
       margin-bottom: 2rem;
     }
+    .obs-section {
+      background: white;
+      padding: 1.25rem 1.5rem;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 1.5rem;
+    }
+    .obs-endpoint {
+      font-family: monospace;
+      background: #f5f5f5;
+      padding: 0.5rem 0.75rem;
+      border-radius: 4px;
+      display: inline-block;
+      margin: 0;
+    }
+    .obs-help {
+      color: #555;
+      margin: 0.75rem 0 1rem;
+      font-size: 0.9rem;
+    }
+    .live-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0.75rem;
+    }
+    .live-item {
+      border: 1px solid #d6d6d6;
+      background: #fff;
+      border-radius: 6px;
+      padding: 0.65rem 0.8rem;
+      text-align: left;
+      cursor: pointer;
+    }
+    .live-item:hover {
+      background: #f7f7f7;
+    }
     .form-group {
       margin-bottom: 1rem;
     }
@@ -136,21 +185,60 @@ import { Video } from '../../shared/models/video.model';
     }
   `]
 })
-export class TeacherDashboardComponent implements OnInit {
+export class TeacherDashboardComponent implements OnInit, OnDestroy {
   videos: Video[] = [];
   title: string = '';
   description: string = '';
   isPublic: boolean = false;
-  isLive: boolean = false;
   selectedFile: File | null = null;
   uploading: boolean = false;
   isLoading: boolean = false;
+  activeLiveStreams: string[] = [];
+  obsServerUrl: string = '';
+  obsStreamKey: string = '';
+  private liveSubscription?: Subscription;
+  private previousActiveLiveCount: number = 0;
 
-  constructor(private videoService: VideoService, private router: Router) {}
+  constructor(
+    private videoService: VideoService,
+    private streamGatewayService: StreamGatewayService,
+    private authService: AuthService,
+    private router: Router
+  ) {}
 
   ngOnInit(): void {
     this.loadVideos();
+    this.liveSubscription = this.streamGatewayService.watchActiveStreams().subscribe(streams => {
+      const previousCount = this.previousActiveLiveCount;
+      this.activeLiveStreams = streams;
+      this.previousActiveLiveCount = streams.length;
+
+      if (previousCount > streams.length) {
+        this.loadVideos();
+      }
+    });
+    this.obsStreamKey = this.authService.getOrCreateObsStreamKey() || 'professor-sala';
+    this.obsServerUrl = this.streamGatewayService.getObsServerUrl();
   }
+
+  ngOnDestroy(): void {
+    this.liveSubscription?.unsubscribe();
+  }
+  watchLive(liveId: string): void {
+    this.router.navigate(['/video/live', liveId]);
+  }
+
+  regenerateStreamKey(): void {
+    this.authService.regenerateObsStreamKey().subscribe({
+      next: (key) => {
+        this.obsStreamKey = key;
+      },
+      error: () => {
+        alert('Não foi possível gerar nova chave no momento.');
+      }
+    });
+  }
+
 
   onVideoSelected(video: Video): void {
     this.isLoading = true;
@@ -181,7 +269,7 @@ export class TeacherDashboardComponent implements OnInit {
       this.title,
       this.description,
       this.isPublic,
-      this.isLive
+      false
     ).subscribe({
       next: () => {
         this.uploading = false;
@@ -201,7 +289,6 @@ export class TeacherDashboardComponent implements OnInit {
     this.title = '';
     this.description = '';
     this.isPublic = false;
-    this.isLive = false;
     this.selectedFile = null;
   }
 }

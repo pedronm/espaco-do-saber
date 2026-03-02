@@ -72,6 +72,7 @@ public class SecurityConfig {
         String[] publicRoutes = {
                 "/api/auth/**",
                 "/api/videos/public",
+            "/api/internal/streams/**",
             "/api/videos/stream/{id}",
             "/api/videos/stream/active"
         };
@@ -129,9 +130,7 @@ public class SecurityConfig {
                 "/api/teacher/**",                
                 "/api/videos/upload",
                 "/api/videos/stream",
-            "/api/videos/stream/{id}",
-            "/api/videos/stream/chunk",
-            "/api/videos/stream/end"
+            "/api/videos/stream/{id}"
         };
         http.securityMatcher(teacherRoutes)
                 .csrf(csrf -> csrf.disable())

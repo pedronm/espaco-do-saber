@@ -7,6 +7,7 @@ export interface Video {
   teacherName: string;
   duration: number;
   isLive: boolean;
+  wasLive?: boolean;
   isPublic: boolean;
   uploadedAt: Date;
   streamingUrl: string

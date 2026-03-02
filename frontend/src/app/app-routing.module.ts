@@ -7,9 +7,7 @@ import { StudentDashboardComponent } from './student/components/student-dashboar
 import { AdminDashboardComponent } from './admin/components/admin-dashboard.component';
 import { HomeComponent } from './pages/home-component/home.component'
 import { VideoPlayerComponent } from './shared/components/video-player.component';
-import { LiveStreamComponent } from './shared/components/live-stream.component';
 import { AuthGuard } from './shared/guards/auth.guard';
-import { LiveStreamExitGuard } from './shared/guards/live-stream-exit.guard';
 
 const routes: Routes = [
   { path: '', redirectTo: '/login', pathMatch: 'full' },
@@ -53,13 +51,6 @@ const routes: Routes = [
     path: 'video/live/:liveId',
     component: VideoPlayerComponent,
     canActivate: [AuthGuard]
-  },
-  {
-    path: 'live',
-    component: LiveStreamComponent,
-    canActivate: [AuthGuard],
-    data: { roles: ['TEACHER', 'ADMIN'] },
-    canDeactivate: [LiveStreamExitGuard]
   }
 ];
 

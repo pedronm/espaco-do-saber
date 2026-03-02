@@ -22,6 +22,7 @@ import { Video } from '../models/video.model';
             <p>{{ video.description }}</p>
             <p *ngIf="showTeacherName" class="teacher-name">Professor: {{ video.teacherName }}</p>
             <span class="badge" [class.live]="video.isLive">{{ video.isLive ? 'AO VIVO' : 'GRAVADO' }}</span>
+            <span class="badge ended-live" *ngIf="!video.isLive && video.wasLive">TRANSMISSÃO ENCERRADA</span>
             <span class="badge" [class.public]="video.isPublic">{{ video.isPublic ? 'PÚBLICO' : 'PRIVADO' }}</span>
           </div>
         </div>
@@ -121,6 +122,10 @@ import { Video } from '../models/video.model';
     }
     .badge.public {
       background: #4caf50;
+      color: white;
+    }
+    .badge.ended-live {
+      background: #ff9800;
       color: white;
     }
   `]

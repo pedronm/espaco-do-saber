@@ -13,6 +13,7 @@ public class VideoResponse {
     private String teacherName;
     private Long duration;
     private Boolean isLive;
+    private Boolean wasLive;
     private Boolean isPublic;
     private LocalDateTime uploadedAt;
     private String streamingUrl;

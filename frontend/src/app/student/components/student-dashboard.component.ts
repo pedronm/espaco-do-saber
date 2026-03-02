@@ -1,7 +1,9 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
+import { StreamGatewayService } from '../../shared/services/stream-gateway.service';
+import { Subscription } from 'rxjs';
 
 @Component({
   standalone: false,
@@ -9,7 +11,15 @@ import { Video } from '../../shared/models/video.model';
   template: `
     <div class="student-dashboard">
       <h2>Quadro de aulas</h2>
-      <app-live-stream-list title="Transmissões em andamento"></app-live-stream-list>
+      <div class="live-section">
+        <h3>Transmissões OBS ativas</h3>
+        <p class="no-videos" *ngIf="activeLiveStreams.length === 0">Nenhuma transmissão ativa no momento.</p>
+        <div class="live-grid" *ngIf="activeLiveStreams.length > 0">
+          <button class="live-item" *ngFor="let liveId of activeLiveStreams" (click)="watchLive(liveId)">
+            Assistir transmissão {{ liveId }}
+          </button>
+        </div>
+      </div>
        <app-video-grid 
         [isLoading]="isLoading"
         [videos]="videos" 
@@ -34,6 +44,29 @@ import { Video } from '../../shared/models/video.model';
       padding: 2rem;
       border-radius: 8px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .live-section {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 8px;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .live-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0.75rem;
+    }
+    .live-item {
+      border: 1px solid #d6d6d6;
+      background: #fff;
+      border-radius: 6px;
+      padding: 0.65rem 0.8rem;
+      text-align: left;
+      cursor: pointer;
+    }
+    .live-item:hover {
+      background: #f7f7f7;
     }
     .no-videos {
       text-align: center;
@@ -98,14 +131,27 @@ import { Video } from '../../shared/models/video.model';
     }
   `]
 })
-export class StudentDashboardComponent implements OnInit {
+export class StudentDashboardComponent implements OnInit, OnDestroy {
   videos: Video[] = [];
   isLoading: boolean = false;
+  activeLiveStreams: string[] = [];
+  private liveSubscription?: Subscription;
 
-  constructor(private videoService: VideoService, private router: Router) {}
+  constructor(
+    private videoService: VideoService,
+    private streamGatewayService: StreamGatewayService,
+    private router: Router
+  ) {}
 
   ngOnInit(): void {
     this.loadVideos();
+    this.liveSubscription = this.streamGatewayService.watchActiveStreams().subscribe(streams => {
+      this.activeLiveStreams = streams;
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.liveSubscription?.unsubscribe();
   }
 
   onVideoSelected(video: Video): void {
@@ -122,6 +168,10 @@ export class StudentDashboardComponent implements OnInit {
     this.videoService.getDashboardVideos().subscribe(videos => {
       this.videos = videos;
     });
+  }
+
+  watchLive(liveId: string): void {
+    this.router.navigate(['/video/live', liveId]);
   }
 
   getStreamUrl(id: number): string {

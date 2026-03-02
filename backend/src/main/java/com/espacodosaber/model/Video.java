@@ -43,6 +43,9 @@ public class Video {
     private Boolean isLive = false;
 
     @Column(nullable = false)
+    private Boolean wasLive = false;
+
+    @Column(nullable = false)
     private Boolean isPublic = false;
 
     @Column(nullable = false)

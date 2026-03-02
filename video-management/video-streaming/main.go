@@ -3,17 +3,15 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"net/http"
+	"net/url"
 	"os"
-	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -25,28 +23,77 @@ import (
 	"github.com/nareix/joy4/format/rtmp"
 )
 
-type Stream struct {
-	headers      []av.CodecData
-	subscribers  map[chan av.Packet]struct{}
-	closed       chan struct{}
-	mu           sync.RWMutex
-	lastObject   string
-	lastUploaded time.Time
+type stream struct {
+	headers     []av.CodecData
+	subscribers map[chan av.Packet]struct{}
+	closed      chan struct{}
+	mu          sync.RWMutex
 }
 
-func NewStream(headers []av.CodecData) *Stream {
-	return &Stream{
+type streamHub struct {
+	streams map[string]*stream
+	mu      sync.RWMutex
+}
+
+type minioConfig struct {
+	Endpoint  string
+	AccessKey string
+	SecretKey string
+	Bucket    string
+	Secure    bool
+}
+
+type serverConfig struct {
+	RTMPApp          string
+	RTMPPublicHost   string
+	AllowedStreamKey map[string]struct{}
+	BackendBaseURL   string
+	InternalToken    string
+}
+
+func newStream(headers []av.CodecData) *stream {
+	return &stream{
 		headers:     headers,
-		subscribers: make(map[chan av.Packet]struct{}),
+		subscribers: map[chan av.Packet]struct{}{},
 		closed:      make(chan struct{}),
 	}
 }
 
-func (s *Stream) Headers() []av.CodecData {
-	return s.headers
+func newStreamHub() *streamHub {
+	return &streamHub{streams: map[string]*stream{}}
 }
 
-func (s *Stream) Subscribe() chan av.Packet {
+func (h *streamHub) get(key string) (*stream, bool) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	item, ok := h.streams[key]
+	return item, ok
+}
+
+func (h *streamHub) set(key string, item *stream) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.streams[key] = item
+}
+
+func (h *streamHub) delete(key string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.streams, key)
+}
+
+func (h *streamHub) list() []string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	keys := make([]string, 0, len(h.streams))
+	for key := range h.streams {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func (s *stream) subscribe() chan av.Packet {
 	ch := make(chan av.Packet, 1024)
 	s.mu.Lock()
 	s.subscribers[ch] = struct{}{}
@@ -54,7 +101,7 @@ func (s *Stream) Subscribe() chan av.Packet {
 	return ch
 }
 
-func (s *Stream) Unsubscribe(ch chan av.Packet) {
+func (s *stream) unsubscribe(ch chan av.Packet) {
 	s.mu.Lock()
 	if _, ok := s.subscribers[ch]; ok {
 		delete(s.subscribers, ch)
@@ -63,7 +110,7 @@ func (s *Stream) Unsubscribe(ch chan av.Packet) {
 	s.mu.Unlock()
 }
 
-func (s *Stream) Broadcast(pkt av.Packet) {
+func (s *stream) broadcast(pkt av.Packet) {
 	s.mu.RLock()
 	for ch := range s.subscribers {
 		select {
@@ -74,7 +121,7 @@ func (s *Stream) Broadcast(pkt av.Packet) {
 	s.mu.RUnlock()
 }
 
-func (s *Stream) Close() {
+func (s *stream) close() {
 	s.mu.Lock()
 	for ch := range s.subscribers {
 		close(ch)
@@ -84,189 +131,49 @@ func (s *Stream) Close() {
 	s.mu.Unlock()
 }
 
-type StreamHub struct {
-	streams map[string]*Stream
-	mu      sync.RWMutex
-}
-
-type ActiveUDPStreams struct {
-	streams map[string]time.Time
-	mu      sync.RWMutex
-}
-
-func NewStreamHub() *StreamHub {
-	return &StreamHub{streams: make(map[string]*Stream)}
-}
-
-func NewActiveUDPStreams() *ActiveUDPStreams {
-	return &ActiveUDPStreams{streams: make(map[string]time.Time)}
-}
-
-func (h *StreamHub) Get(key string) (*Stream, bool) {
-	h.mu.RLock()
-	stream, ok := h.streams[key]
-	h.mu.RUnlock()
-	return stream, ok
-}
-
-func (h *StreamHub) Set(key string, stream *Stream) {
-	h.mu.Lock()
-	h.streams[key] = stream
-	h.mu.Unlock()
-}
-
-func (h *StreamHub) Delete(key string) {
-	h.mu.Lock()
-	delete(h.streams, key)
-	h.mu.Unlock()
-}
-
-func (h *StreamHub) List() []string {
-	h.mu.RLock()
-	keys := make([]string, 0, len(h.streams))
-	for key := range h.streams {
-		keys = append(keys, key)
-	}
-	h.mu.RUnlock()
-	return keys
-}
-
-func (a *ActiveUDPStreams) Touch(streamID string) {
-	a.mu.Lock()
-	a.streams[streamID] = time.Now().UTC()
-	a.mu.Unlock()
-}
-
-func (a *ActiveUDPStreams) Remove(streamID string) {
-	a.mu.Lock()
-	delete(a.streams, streamID)
-	a.mu.Unlock()
-}
-
-func (a *ActiveUDPStreams) ListActive(ttl time.Duration) []string {
-	now := time.Now().UTC()
-	a.mu.Lock()
-	keys := make([]string, 0, len(a.streams))
-	for key, lastSeen := range a.streams {
-		if now.Sub(lastSeen) > ttl {
-			delete(a.streams, key)
-			continue
-		}
-		keys = append(keys, key)
-	}
-	a.mu.Unlock()
-	return keys
-}
-
-type MinioConfig struct {
-	Endpoint  string
-	AccessKey string
-	SecretKey string
-	Bucket    string
-	Secure    bool
-}
-
-const (
-	udpMagic          = 0x45534431
-	udpFlagEndOfSteam = 0x1
-)
-
-type udpChunkKey struct {
-	streamID string
-	seq      int
-}
-
-type udpPendingChunk struct {
-	fragments map[int][]byte
-	expected  int
-	createdAt time.Time
-}
-
-type udpChunkAssembler struct {
-	pending map[udpChunkKey]*udpPendingChunk
-	mu      sync.Mutex
-}
-
-func newUDPChunkAssembler() *udpChunkAssembler {
-	return &udpChunkAssembler{
-		pending: make(map[udpChunkKey]*udpPendingChunk),
-	}
-}
-
-func (a *udpChunkAssembler) addFragment(streamID string, seq int, fragIdx int, fragCount int, payload []byte) ([]byte, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	key := udpChunkKey{streamID: streamID, seq: seq}
-	pending, ok := a.pending[key]
-	if !ok {
-		pending = &udpPendingChunk{
-			fragments: make(map[int][]byte),
-			expected:  fragCount,
-			createdAt: time.Now().UTC(),
-		}
-		a.pending[key] = pending
-	}
-
-	if _, exists := pending.fragments[fragIdx]; !exists {
-		copyPayload := make([]byte, len(payload))
-		copy(copyPayload, payload)
-		pending.fragments[fragIdx] = copyPayload
-	}
-
-	if len(pending.fragments) != pending.expected {
-		return nil, false
-	}
-
-	indices := make([]int, 0, len(pending.fragments))
-	for idx := range pending.fragments {
-		indices = append(indices, idx)
-	}
-	sort.Ints(indices)
-
-	total := 0
-	for _, idx := range indices {
-		total += len(pending.fragments[idx])
-	}
-
-	full := make([]byte, 0, total)
-	for _, idx := range indices {
-		full = append(full, pending.fragments[idx]...)
-	}
-
-	delete(a.pending, key)
-	return full, true
-}
-
-func (a *udpChunkAssembler) cleanup(ttl time.Duration) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	now := time.Now().UTC()
-	for key, pending := range a.pending {
-		if now.Sub(pending.createdAt) > ttl {
-			delete(a.pending, key)
-		}
-	}
-}
-
-func loadMinioConfig() MinioConfig {
+func loadMinioConfig() minioConfig {
 	endpoint := os.Getenv("MINIO_ENDPOINT")
 	port := os.Getenv("MINIO_PORT")
-	if port == "" {
-		port = "9000"
-	}
 	if endpoint == "" {
 		endpoint = "video-storage"
 	}
+	if port == "" {
+		port = "9000"
+	}
+
 	secure := strings.ToLower(os.Getenv("MINIO_SECURE")) == "true"
 
-	return MinioConfig{
+	return minioConfig{
 		Endpoint:  fmt.Sprintf("%s:%s", endpoint, port),
 		AccessKey: envOrDefault("MINIO_ACCESS_KEY", "minioadmin"),
 		SecretKey: envOrDefault("MINIO_SECRET_KEY", "minioadmin"),
 		Bucket:    envOrDefault("MINIO_BUCKET", "videos"),
 		Secure:    secure,
+	}
+}
+
+func loadServerConfig() serverConfig {
+	rtmpApp := envOrDefault("RTMP_APP", "live")
+	rtmpPublicHost := envOrDefault("RTMP_PUBLIC_HOST", "localhost")
+
+	allowedKeys := map[string]struct{}{}
+	allowedKeysRaw := strings.TrimSpace(os.Getenv("RTMP_ALLOWED_STREAM_KEYS"))
+	if allowedKeysRaw != "" {
+		for _, key := range strings.Split(allowedKeysRaw, ",") {
+			trimmed := strings.TrimSpace(key)
+			if trimmed == "" {
+				continue
+			}
+			allowedKeys[trimmed] = struct{}{}
+		}
+	}
+
+	return serverConfig{
+		RTMPApp:          rtmpApp,
+		RTMPPublicHost:   rtmpPublicHost,
+		AllowedStreamKey: allowedKeys,
+		BackendBaseURL:   envOrDefault("BACKEND_BASE_URL", "http://backend:8080"),
+		InternalToken:    envOrDefault("STREAMING_FINALIZATION_INTERNAL_TOKEN", "internal-stream-finalize-token"),
 	}
 }
 
@@ -296,46 +203,34 @@ func ensureBucketWithRetry(client *minio.Client, bucket string, attempts int, de
 		err := ensureBucket(ctx, client, bucket)
 		cancel()
 		if err == nil {
-			if i > 1 {
-				log.Printf("minio became ready after %d attempts", i)
-			}
 			return nil
 		}
-
 		lastErr = err
-		if i < attempts {
-			log.Printf("minio not ready (attempt %d/%d): %v", i, attempts, err)
-			time.Sleep(delay)
-		}
+		time.Sleep(delay)
 	}
-
 	return fmt.Errorf("minio bucket setup failed after %d attempts: %w", attempts, lastErr)
 }
 
 func main() {
-	minioConfig := loadMinioConfig()
-	minioClient, err := minio.New(minioConfig.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(minioConfig.AccessKey, minioConfig.SecretKey, ""),
-		Secure: minioConfig.Secure,
+	cfg := loadMinioConfig()
+	serverCfg := loadServerConfig()
+	minioClient, err := minio.New(cfg.Endpoint, &minio.Options{
+		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
+		Secure: cfg.Secure,
 	})
 	if err != nil {
 		log.Fatalf("minio client init failed: %v", err)
 	}
 
-	log.Printf("minio endpoint: %s", minioClient.EndpointURL())
-
-	if err := ensureBucketWithRetry(minioClient, minioConfig.Bucket, 30, 2*time.Second); err != nil {
+	if err := ensureBucketWithRetry(minioClient, cfg.Bucket, 30, 2*time.Second); err != nil {
 		log.Fatalf("minio bucket setup failed: %v", err)
 	}
 
-	hub := NewStreamHub()
-	activeUDPStreams := NewActiveUDPStreams()
-
-	go startUDPIngestServer(":5005", minioClient, minioConfig.Bucket, activeUDPStreams)
+	hub := newStreamHub()
 
 	httpServer := &http.Server{
 		Addr:    ":8083",
-		Handler: buildHTTPHandler(hub, activeUDPStreams, minioClient, minioConfig.Bucket),
+		Handler: buildHTTPHandler(hub, minioClient, cfg.Bucket, serverCfg),
 	}
 	go func() {
 		log.Printf("http server listening on %s", httpServer.Addr)
@@ -347,10 +242,10 @@ func main() {
 	rtmpServer := &rtmp.Server{
 		Addr: ":1935",
 		HandlePublish: func(conn *rtmp.Conn) {
-			handlePublish(conn, hub, minioClient, minioConfig.Bucket)
+			handlePublish(conn, hub, minioClient, cfg.Bucket, serverCfg)
 		},
 		HandlePlay: func(conn *rtmp.Conn) {
-			handlePlay(conn, hub)
+			handlePlay(conn, hub, serverCfg)
 		},
 	}
 
@@ -360,110 +255,15 @@ func main() {
 	}
 }
 
-func startUDPIngestServer(addr string, minioClient *minio.Client, bucket string, activeUDPStreams *ActiveUDPStreams) {
-	conn, err := net.ListenPacket("udp", addr)
+func handlePublish(conn *rtmp.Conn, hub *streamHub, minioClient *minio.Client, bucket string, cfg serverConfig) {
+	log.Printf("publish attempt path=%s", conn.URL.Path)
+	startedAt := time.Now().UTC()
+	streamKey, err := resolveStreamKey(conn.URL.Path, cfg)
 	if err != nil {
-		log.Printf("udp ingest listen error: %v", err)
+		log.Printf("publish denied path=%s err=%v", conn.URL.Path, err)
 		return
 	}
-	defer conn.Close()
-
-	assembler := newUDPChunkAssembler()
-	go func() {
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for range ticker.C {
-			assembler.cleanup(2 * time.Minute)
-		}
-	}()
-
-	buf := make([]byte, 65535)
-	log.Printf("udp ingest listening on %s", addr)
-
-	for {
-		n, _, readErr := conn.ReadFrom(buf)
-		if readErr != nil {
-			log.Printf("udp read error: %v", readErr)
-			continue
-		}
-		if n < 19 {
-			continue
-		}
-
-		packet := buf[:n]
-		magic := binary.BigEndian.Uint32(packet[0:4])
-		if magic != udpMagic {
-			continue
-		}
-
-		flags := packet[4]
-		streamIDLen := int(binary.BigEndian.Uint16(packet[5:7]))
-		seq := int(binary.BigEndian.Uint32(packet[7:11]))
-		fragIdx := int(binary.BigEndian.Uint32(packet[11:15]))
-		fragCount := int(binary.BigEndian.Uint32(packet[15:19]))
-
-		headerSize := 19 + streamIDLen
-		if n < headerSize || streamIDLen <= 0 {
-			continue
-		}
-
-		streamID := string(packet[19:headerSize])
-		payload := packet[headerSize:]
-
-		if (flags & udpFlagEndOfSteam) != 0 {
-			activeUDPStreams.Remove(streamID)
-			uploadEndMarker(minioClient, bucket, streamID, seq)
-			continue
-		}
-
-		activeUDPStreams.Touch(streamID)
-
-		if fragCount <= 0 || fragIdx < 0 || fragIdx >= fragCount {
-			continue
-		}
-
-		fullChunk, ready := assembler.addFragment(streamID, seq, fragIdx, fragCount, payload)
-		if !ready {
-			continue
-		}
-
-		objectName := fmt.Sprintf("udp/%s/chunk-%06d.webm", streamID, seq)
-		_, uploadErr := minioClient.PutObject(context.Background(), bucket, objectName, bytes.NewReader(fullChunk), int64(len(fullChunk)), minio.PutObjectOptions{
-			ContentType: "video/webm",
-		})
-		if uploadErr != nil {
-			log.Printf("udp chunk upload error stream=%s seq=%d: %v", streamID, seq, uploadErr)
-			continue
-		}
-
-		log.Printf("udp chunk uploaded stream=%s seq=%d size=%d", streamID, seq, len(fullChunk))
-	}
-}
-
-func uploadEndMarker(minioClient *minio.Client, bucket string, streamID string, finalSeq int) {
-	marker := map[string]any{
-		"stream":        streamID,
-		"finalSequence": finalSeq,
-		"endedAt":       time.Now().UTC().Format(time.RFC3339),
-	}
-
-	content, err := json.Marshal(marker)
-	if err != nil {
-		log.Printf("udp end marker marshal error: %v", err)
-		return
-	}
-
-	objectName := "udp/" + streamID + "/end-" + strconv.FormatInt(time.Now().UTC().Unix(), 10) + ".json"
-	_, uploadErr := minioClient.PutObject(context.Background(), bucket, objectName, bytes.NewReader(content), int64(len(content)), minio.PutObjectOptions{
-		ContentType: "application/json",
-	})
-	if uploadErr != nil {
-		log.Printf("udp end marker upload error stream=%s: %v", streamID, uploadErr)
-	}
-}
-
-func handlePublish(conn *rtmp.Conn, hub *StreamHub, minioClient *minio.Client, bucket string) {
-	streamKey := streamKeyFromURL(conn.URL.Path)
+	log.Printf("publish accepted app=%s key=%s", cfg.RTMPApp, streamKey)
 
 	headers, err := conn.Streams()
 	if err != nil {
@@ -471,26 +271,24 @@ func handlePublish(conn *rtmp.Conn, hub *StreamHub, minioClient *minio.Client, b
 		return
 	}
 
-	stream := NewStream(headers)
-	hub.Set(streamKey, stream)
+	active := newStream(headers)
+	hub.set(streamKey, active)
 
 	tempFile, err := os.CreateTemp("", "stream-*.flv")
 	if err != nil {
 		log.Printf("stream temp file error: %v", err)
-		hub.Delete(streamKey)
+		hub.delete(streamKey)
 		return
 	}
 	defer func() {
-		if err := os.Remove(tempFile.Name()); err != nil {
-			log.Printf("temp cleanup error: %v", err)
-		}
+		_ = os.Remove(tempFile.Name())
 	}()
 
 	muxer := flv.NewMuxer(tempFile)
 	if err := muxer.WriteHeader(headers); err != nil {
 		log.Printf("flv header error: %v", err)
-		hub.Delete(streamKey)
-		stream.Close()
+		hub.delete(streamKey)
+		active.close()
 		return
 	}
 
@@ -503,44 +301,90 @@ func handlePublish(conn *rtmp.Conn, hub *StreamHub, minioClient *minio.Client, b
 			log.Printf("flv write error: %v", err)
 			break
 		}
-		stream.Broadcast(pkt)
+		active.broadcast(pkt)
 	}
 
 	if err := tempFile.Close(); err != nil {
 		log.Printf("stream close error: %v", err)
 	}
 
-	objectName := fmt.Sprintf("%s/%s.flv", streamKey, time.Now().UTC().Format("20060102-150405"))
+	objectName := fmt.Sprintf("recordings/%s/%s.flv", streamKey, time.Now().UTC().Format("20060102-150405"))
 	if _, err := minioClient.FPutObject(context.Background(), bucket, objectName, tempFile.Name(), minio.PutObjectOptions{
 		ContentType: "video/x-flv",
 	}); err != nil {
 		log.Printf("minio upload error: %v", err)
-	} else {
-		stream.mu.Lock()
-		stream.lastObject = objectName
-		stream.lastUploaded = time.Now().UTC()
-		stream.mu.Unlock()
 	}
 
-	hub.Delete(streamKey)
-	stream.Close()
+	duration := int64(time.Since(startedAt).Seconds())
+	if err := notifyStreamFinalized(cfg, streamKey, objectName, duration); err != nil {
+		log.Printf("stream finalize notify error key=%s err=%v", streamKey, err)
+	} else {
+		log.Printf("stream finalize notified key=%s object=%s", streamKey, objectName)
+	}
+
+	log.Printf("publish finished key=%s recording=%s", streamKey, objectName)
+
+	hub.delete(streamKey)
+	active.close()
 }
 
-func handlePlay(conn *rtmp.Conn, hub *StreamHub) {
-	streamKey := streamKeyFromURL(conn.URL.Path)
-	stream, ok := hub.Get(streamKey)
+func notifyStreamFinalized(cfg serverConfig, liveID string, storageObject string, durationSeconds int64) error {
+	payload := map[string]any{
+		"liveId":          liveID,
+		"storageObject":   storageObject,
+		"durationSeconds": durationSeconds,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+
+	request, err := http.NewRequest(http.MethodPost, cfg.BackendBaseURL+"/api/internal/streams/finalized", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Internal-Token", cfg.InternalToken)
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	if response.StatusCode >= 300 {
+		data, _ := io.ReadAll(response.Body)
+		return fmt.Errorf("backend finalize status=%d body=%s", response.StatusCode, string(data))
+	}
+
+	return nil
+}
+
+func handlePlay(conn *rtmp.Conn, hub *streamHub, cfg serverConfig) {
+	log.Printf("play attempt path=%s", conn.URL.Path)
+	streamKey, err := resolveStreamKey(conn.URL.Path, cfg)
+	if err != nil {
+		log.Printf("play denied path=%s err=%v", conn.URL.Path, err)
+		return
+	}
+	log.Printf("play accepted app=%s key=%s", cfg.RTMPApp, streamKey)
+
+	active, ok := hub.get(streamKey)
 	if !ok {
 		log.Printf("stream not found: %s", streamKey)
 		return
 	}
 
-	if err := conn.WriteHeader(stream.Headers()); err != nil {
+	if err := conn.WriteHeader(active.headers); err != nil {
 		log.Printf("rtmp write header error: %v", err)
 		return
 	}
 
-	ch := stream.Subscribe()
-	defer stream.Unsubscribe(ch)
+	ch := active.subscribe()
+	defer active.unsubscribe(ch)
 
 	for {
 		select {
@@ -551,37 +395,17 @@ func handlePlay(conn *rtmp.Conn, hub *StreamHub) {
 			if err := conn.WritePacket(pkt); err != nil {
 				return
 			}
-		case <-stream.closed:
+		case <-active.closed:
 			return
 		}
 	}
 }
 
-func streamKeyFromURL(path string) string {
-	key := strings.TrimPrefix(path, "/")
-	if key == "" {
-		key = "default"
-	}
-	return key
-}
-
-func buildHTTPHandler(hub *StreamHub, activeUDPStreams *ActiveUDPStreams, minioClient *minio.Client, bucket string) http.Handler {
+func buildHTTPHandler(hub *streamHub, minioClient *minio.Client, bucket string, cfg serverConfig) http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-
-	mux.HandleFunc("/ingest/chunk", func(w http.ResponseWriter, r *http.Request) {
-		handleIngestChunk(w, r, activeUDPStreams, minioClient, bucket)
-	})
-
-	mux.HandleFunc("/ingest/end", func(w http.ResponseWriter, r *http.Request) {
-		handleIngestEnd(w, r, activeUDPStreams, minioClient, bucket)
-	})
-
-	mux.HandleFunc("/ingest/final", func(w http.ResponseWriter, r *http.Request) {
-		handleIngestFinal(w, r, minioClient, bucket)
 	})
 
 	mux.HandleFunc("/streams", func(w http.ResponseWriter, r *http.Request) {
@@ -589,377 +413,266 @@ func buildHTTPHandler(hub *StreamHub, activeUDPStreams *ActiveUDPStreams, minioC
 			http.NotFound(w, r)
 			return
 		}
-
-		rtmpStreams := hub.List()
-		udpStreams := activeUDPStreams.ListActive(15 * time.Second)
-
-		combined := make([]string, 0, len(rtmpStreams)+len(udpStreams))
-		seen := make(map[string]struct{})
-
-		for _, stream := range rtmpStreams {
-			if _, ok := seen[stream]; ok {
-				continue
-			}
-			seen[stream] = struct{}{}
-			combined = append(combined, stream)
-		}
-
-		for _, stream := range udpStreams {
-			if _, ok := seen[stream]; ok {
-				continue
-			}
-			seen[stream] = struct{}{}
-			combined = append(combined, stream)
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{"streams": combined})
+		writeJSON(w, http.StatusOK, map[string]any{"streams": hub.list()})
 	})
 
-	// HLS streaming endpoint for live videos
-	mux.HandleFunc("/streams/", func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/object") {
-			handleStreamObject(w, r, hub, minioClient, bucket)
-		} else if strings.HasSuffix(r.URL.Path, "/hls/index.m3u8") {
-			handleStreamHlsIndex(w, r, hub, activeUDPStreams)
-		} else if strings.Contains(r.URL.Path, "/hls/") {
-			handleStreamHlsSegment(w, r, minioClient, bucket)
-		} else if strings.HasSuffix(r.URL.Path, "/recording") {
-			handleStreamRecording(w, r, minioClient, bucket)
-		} else if strings.HasSuffix(r.URL.Path, "/live") {
-			handleStreamLive(w, r, hub)
-		} else {
+	mux.HandleFunc("/obs/config", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/obs/config" {
 			http.NotFound(w, r)
+			return
 		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"server":              "rtmp://" + cfg.RTMPPublicHost + ":1935/" + cfg.RTMPApp,
+			"streamKeyExample":    "sala-101",
+			"playerExample":       "rtmp://" + cfg.RTMPPublicHost + ":1935/" + cfg.RTMPApp + "/sala-101",
+			"requiresAllowedKeys": len(cfg.AllowedStreamKey) > 0,
+		})
 	})
 
-	return mux
+	mux.HandleFunc("/diag/runtime", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/diag/runtime" {
+			http.NotFound(w, r)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"rtmpListen":         ":1935",
+			"httpListen":         ":8083",
+			"rtmpApp":            cfg.RTMPApp,
+			"rtmpPublicHost":     cfg.RTMPPublicHost,
+			"activeStreams":      hub.list(),
+			"allowedKeysEnabled": len(cfg.AllowedStreamKey) > 0,
+			"allowedKeysCount":   len(cfg.AllowedStreamKey),
+		})
+	})
+
+	mux.HandleFunc("/streams/", func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimSuffix(r.URL.Path, "/")
+		r = cloneRequestWithPath(r, path)
+
+		if strings.HasSuffix(path, "/flv") {
+			handleStreamFlv(w, r, hub)
+			return
+		}
+		if strings.HasSuffix(path, "/recording") {
+			handleStreamRecording(w, r, minioClient, bucket)
+			return
+		}
+		if strings.HasSuffix(path, "/live") {
+			handleStreamLive(w, r, hub)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	mux.HandleFunc("/streaming/streams", func(w http.ResponseWriter, r *http.Request) {
+		r = cloneRequestWithPath(r, strings.TrimPrefix(r.URL.Path, "/streaming"))
+		if r.URL.Path != "/streams" {
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"streams": hub.list()})
+	})
+
+	mux.HandleFunc("/streaming/streams/", func(w http.ResponseWriter, r *http.Request) {
+		r = cloneRequestWithPath(r, strings.TrimPrefix(r.URL.Path, "/streaming"))
+		path := strings.TrimSuffix(r.URL.Path, "/")
+		r = cloneRequestWithPath(r, path)
+
+		if strings.HasSuffix(path, "/flv") {
+			handleStreamFlv(w, r, hub)
+			return
+		}
+		if strings.HasSuffix(path, "/recording") {
+			handleStreamRecording(w, r, minioClient, bucket)
+			return
+		}
+		if strings.HasSuffix(path, "/live") {
+			handleStreamLive(w, r, hub)
+			return
+		}
+		http.NotFound(w, r)
+	})
+
+	return withRequestLogging(mux)
 }
 
-func handleStreamHlsIndex(w http.ResponseWriter, r *http.Request, hub *StreamHub, activeUDPStreams *ActiveUDPStreams) {
-	key := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/streams/"), "/hls/index.m3u8")
+func cloneRequestWithPath(r *http.Request, path string) *http.Request {
+	clone := r.Clone(r.Context())
+	clone.URL.Path = path
+	return clone
+}
+
+func withRequestLogging(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startedAt := time.Now()
+		log.Printf("http request method=%s path=%s query=%s remote=%s", r.Method, r.URL.Path, r.URL.RawQuery, r.RemoteAddr)
+		next.ServeHTTP(w, r)
+		log.Printf("http response method=%s path=%s duration=%s", r.Method, r.URL.Path, time.Since(startedAt).String())
+	})
+}
+
+func handleStreamLive(w http.ResponseWriter, r *http.Request, hub *streamHub) {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	key := strings.TrimSuffix(strings.TrimPrefix(path, "/streams/"), "/live")
 	if key == "" {
 		http.NotFound(w, r)
 		return
 	}
 
-	_, activeInRTMP := hub.Get(key)
-	active := activeInRTMP
+	_, active := hub.get(key)
 	if !active {
-		udpActive := activeUDPStreams.ListActive(15 * time.Second)
-		for _, liveID := range udpActive {
-			if liveID == key {
-				active = true
-				break
-			}
+		http.Error(w, "stream not found or not live", http.StatusNotFound)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "live",
+		"stream": key,
+		"rtmp":   "rtmp://video-streaming:1935/live/" + key,
+	})
+}
+
+func handleStreamRecording(w http.ResponseWriter, r *http.Request, minioClient *minio.Client, bucket string) {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	key := strings.TrimSuffix(strings.TrimPrefix(path, "/streams/"), "/recording")
+	if key == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	log.Printf("recording lookup started key=%s path=%s", key, path)
+
+	prefix := fmt.Sprintf("recordings/%s/", key)
+	objects := minioClient.ListObjects(context.Background(), bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
+
+	candidates := make([]string, 0)
+	for object := range objects {
+		if object.Err != nil {
+			continue
+		}
+		if strings.HasSuffix(object.Key, ".flv") {
+			candidates = append(candidates, object.Key)
 		}
 	}
 
-	log.Printf("[HLS] manifest request stream=%s active=%t remote=%s query=%s", key, active, r.RemoteAddr, r.URL.RawQuery)
-
-	playlist := strings.Builder{}
-	playlist.WriteString("#EXTM3U\n")
-	playlist.WriteString("#EXT-X-VERSION:3\n")
-	playlist.WriteString("#EXT-X-TARGETDURATION:8\n")
-	playlist.WriteString("#EXT-X-MEDIA-SEQUENCE:0\n")
-	playlist.WriteString("#EXTINF:8.0,\n")
-	playlist.WriteString("segment.webm?t=" + strconv.FormatInt(time.Now().UTC().UnixMilli(), 10) + "\n")
-	if !active {
-		playlist.WriteString("#EXT-X-ENDLIST\n")
+	if len(candidates) == 0 {
+		log.Printf("recording lookup empty key=%s prefix=%s", key, prefix)
+		http.Error(w, "recording not found", http.StatusNotFound)
+		return
 	}
 
-	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	sort.Strings(candidates)
+	latestObject := candidates[len(candidates)-1]
+	obj, err := minioClient.GetObject(context.Background(), bucket, latestObject, minio.GetObjectOptions{})
+	if err != nil {
+		log.Printf("recording object open failed key=%s object=%s err=%v", key, latestObject, err)
+		http.Error(w, "recording not found", http.StatusNotFound)
+		return
+	}
+	defer obj.Close()
+	log.Printf("recording streaming key=%s object=%s", key, latestObject)
+
+	parts := strings.Split(latestObject, "/")
+	fileName := parts[len(parts)-1]
+	if !strings.HasSuffix(strings.ToLower(fileName), ".flv") {
+		fileName = fileName + ".flv"
+	}
+	sanitizedKey := strings.ReplaceAll(key, "/", "-")
+	if !strings.HasPrefix(fileName, sanitizedKey+"-") {
+		fileName = sanitizedKey + "-" + fileName
+	}
+
+	w.Header().Set("Content-Type", "video/x-flv")
+	w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"; filename*=UTF-8''%s", fileName, url.PathEscape(fileName)))
+	w.Header().Set("X-Recording-Filename", fileName)
 	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(playlist.String()))
+	_, _ = io.Copy(w, obj)
 }
 
-func handleStreamHlsSegment(w http.ResponseWriter, r *http.Request, minioClient *minio.Client, bucket string) {
-	prefix := strings.TrimPrefix(r.URL.Path, "/streams/")
-	parts := strings.SplitN(prefix, "/hls/", 2)
-	if len(parts) != 2 || parts[0] == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	streamKey := parts[0]
-	segmentName := parts[1]
-	log.Printf("[HLS] segment request stream=%s segment=%s remote=%s query=%s", streamKey, segmentName, r.RemoteAddr, r.URL.RawQuery)
-	streamRecordingContent(w, streamKey, minioClient, bucket)
-}
-
-func handleIngestChunk(w http.ResponseWriter, r *http.Request, activeUDPStreams *ActiveUDPStreams, minioClient *minio.Client, bucket string) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if err := r.ParseMultipartForm(70 << 20); err != nil {
-		http.Error(w, "invalid multipart payload", http.StatusBadRequest)
-		return
-	}
-
-	liveID := r.FormValue("liveId")
-	if liveID == "" {
-		http.Error(w, "liveId is required", http.StatusBadRequest)
-		return
-	}
-
-	sequenceText := r.FormValue("sequence")
-	sequence, err := strconv.Atoi(sequenceText)
-	if err != nil {
-		http.Error(w, "invalid sequence", http.StatusBadRequest)
-		return
-	}
-
-	chunkFile, _, err := r.FormFile("chunk")
-	if err != nil {
-		http.Error(w, "chunk is required", http.StatusBadRequest)
-		return
-	}
-	defer chunkFile.Close()
-
-	payload, err := io.ReadAll(chunkFile)
-	if err != nil {
-		http.Error(w, "failed to read chunk", http.StatusBadRequest)
-		return
-	}
-
-	log.Printf("[INGEST] chunk received liveId=%s seq=%d bytes=%d remote=%s", liveID, sequence, len(payload), r.RemoteAddr)
-
-	objectName := fmt.Sprintf("udp/%s/chunk-%06d.webm", liveID, sequence)
-	_, err = minioClient.PutObject(context.Background(), bucket, objectName, bytes.NewReader(payload), int64(len(payload)), minio.PutObjectOptions{
-		ContentType: "video/webm",
-	})
-	if err != nil {
-		http.Error(w, "failed to persist chunk", http.StatusBadGateway)
-		return
-	}
-
-	log.Printf("[INGEST] chunk persisted liveId=%s seq=%d object=%s", liveID, sequence, objectName)
-
-	activeUDPStreams.Touch(liveID)
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":   "ACTIVE",
-		"liveId":   liveID,
-		"sequence": sequence,
-	})
-}
-
-func handleIngestEnd(w http.ResponseWriter, r *http.Request, activeUDPStreams *ActiveUDPStreams, minioClient *minio.Client, bucket string) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var payload map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		http.Error(w, "invalid json payload", http.StatusBadRequest)
-		return
-	}
-
-	liveID, _ := payload["liveId"].(string)
-	if liveID == "" {
-		http.Error(w, "liveId is required", http.StatusBadRequest)
-		return
-	}
-
-	finalSequence := 0
-	if value, ok := payload["sequence"].(float64); ok {
-		finalSequence = int(value)
-	}
-
-	log.Printf("[INGEST] end received liveId=%s finalSequence=%d remote=%s", liveID, finalSequence, r.RemoteAddr)
-
-	uploadEndMarker(minioClient, bucket, liveID, finalSequence)
-	activeUDPStreams.Remove(liveID)
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status":   "COMPLETED",
-		"liveId":   liveID,
-		"sequence": finalSequence,
-	})
-}
-
-func handleIngestFinal(w http.ResponseWriter, r *http.Request, minioClient *minio.Client, bucket string) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	if err := r.ParseMultipartForm(800 << 20); err != nil {
-		http.Error(w, "invalid multipart payload", http.StatusBadRequest)
-		return
-	}
-
-	liveID := r.FormValue("liveId")
-	if liveID == "" {
-		http.Error(w, "liveId is required", http.StatusBadRequest)
-		return
-	}
-
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "file is required", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	payload, err := io.ReadAll(file)
-	if err != nil {
-		http.Error(w, "failed to read final recording", http.StatusBadRequest)
-		return
-	}
-
-	log.Printf("[INGEST] final received liveId=%s bytes=%d remote=%s", liveID, len(payload), r.RemoteAddr)
-
-	objectName := fmt.Sprintf("udp/%s/final.webm", liveID)
-	_, err = minioClient.PutObject(context.Background(), bucket, objectName, bytes.NewReader(payload), int64(len(payload)), minio.PutObjectOptions{
-		ContentType: "video/webm",
-	})
-	if err != nil {
-		http.Error(w, "failed to persist final recording", http.StatusBadGateway)
-		return
-	}
-
-	log.Printf("[INGEST] final persisted liveId=%s object=%s", liveID, objectName)
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "OK",
-		"liveId": liveID,
-		"object": objectName,
-	})
-}
-
-func handleStreamObject(w http.ResponseWriter, r *http.Request, hub *StreamHub, minioClient *minio.Client, bucket string) {
-	key := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/streams/"), "/object")
+func handleStreamFlv(w http.ResponseWriter, r *http.Request, hub *streamHub) {
+	path := strings.TrimSuffix(r.URL.Path, "/")
+	key := strings.TrimSuffix(strings.TrimPrefix(path, "/streams/"), "/flv")
 	if key == "" {
 		http.NotFound(w, r)
 		return
 	}
 
-	stream, ok := hub.Get(key)
-	if !ok || stream.lastObject == "" {
-		http.Error(w, "stream not found", http.StatusNotFound)
-		return
-	}
-
-	url, err := minioClient.PresignedGetObject(context.Background(), bucket, stream.lastObject, time.Hour, nil)
-	if err != nil {
-		http.Error(w, "presign failed", http.StatusInternalServerError)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{
-		"object": stream.lastObject,
-		"url":    url.String(),
-	})
-}
-
-func handleStreamLive(w http.ResponseWriter, r *http.Request, hub *StreamHub) {
-	key := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/streams/"), "/live")
-	if key == "" {
-		http.NotFound(w, r)
-		return
-	}
-
-	_, ok := hub.Get(key)
+	active, ok := hub.get(key)
 	if !ok {
 		http.Error(w, "stream not found or not live", http.StatusNotFound)
 		return
 	}
 
-	// Return stream info and RTMP URL for client to connect
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "live",
-		"stream": key,
-		"rtmp":   "rtmp://video-streaming:1935/" + key,
-	})
-}
-
-func handleStreamRecording(w http.ResponseWriter, r *http.Request, minioClient *minio.Client, bucket string) {
-	key := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/streams/"), "/recording")
-	if key == "" {
-		http.NotFound(w, r)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("[RECORDING] request stream=%s remote=%s query=%s", key, r.RemoteAddr, r.URL.RawQuery)
-
-	streamRecordingContent(w, key, minioClient, bucket)
-}
-
-func streamRecordingContent(w http.ResponseWriter, key string, minioClient *minio.Client, bucket string) {
-
-	finalObjectName := fmt.Sprintf("udp/%s/final.webm", key)
-	if finalInfo, err := minioClient.StatObject(context.Background(), bucket, finalObjectName, minio.StatObjectOptions{}); err == nil && finalInfo.Size > 0 {
-		log.Printf("[RECORDING] using final object stream=%s object=%s size=%d", key, finalObjectName, finalInfo.Size)
-		obj, getErr := minioClient.GetObject(context.Background(), bucket, finalObjectName, minio.GetObjectOptions{})
-		if getErr == nil {
-			defer obj.Close()
-			w.Header().Set("Content-Type", "video/webm")
-			w.WriteHeader(http.StatusOK)
-			written, copyErr := io.Copy(w, obj)
-			if copyErr != nil {
-				log.Printf("[RECORDING] final stream copy error stream=%s object=%s err=%v", key, finalObjectName, copyErr)
-			} else {
-				log.Printf("[RECORDING] final stream copy complete stream=%s object=%s bytes=%d", key, finalObjectName, written)
-			}
-			return
-		}
-		log.Printf("[RECORDING] failed opening final object stream=%s object=%s err=%v", key, finalObjectName, getErr)
-	}
-
-	prefix := fmt.Sprintf("udp/%s/", key)
-	objects := minioClient.ListObjects(context.Background(), bucket, minio.ListObjectsOptions{
-		Prefix:    prefix,
-		Recursive: true,
-	})
-
-	chunkObjects := make([]string, 0)
-	for objectInfo := range objects {
-		if objectInfo.Err != nil {
-			log.Printf("recording list error stream=%s: %v", key, objectInfo.Err)
-			continue
-		}
-
-		if strings.HasPrefix(objectInfo.Key, prefix+"chunk-") && strings.HasSuffix(objectInfo.Key, ".webm") {
-			chunkObjects = append(chunkObjects, objectInfo.Key)
-		}
-	}
-
-	if len(chunkObjects) == 0 {
-		log.Printf("[RECORDING] no chunks found stream=%s", key)
-		http.Error(w, "recording not found", http.StatusNotFound)
-		return
-	}
-
-	sort.Strings(chunkObjects)
-	log.Printf("[RECORDING] concatenating chunks stream=%s count=%d", key, len(chunkObjects))
-	w.Header().Set("Content-Type", "video/webm")
+	w.Header().Set("Content-Type", "video/x-flv")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 
-	for _, objectName := range chunkObjects {
-		object, err := minioClient.GetObject(context.Background(), bucket, objectName, minio.GetObjectOptions{})
-		if err != nil {
-			log.Printf("recording get object error stream=%s object=%s err=%v", key, objectName, err)
-			continue
-		}
+	muxer := flv.NewMuxer(w)
+	if err := muxer.WriteHeader(active.headers); err != nil {
+		log.Printf("flv live header error stream=%s err=%v", key, err)
+		return
+	}
+	flusher.Flush()
 
-		written, err := io.Copy(w, object)
-		if err != nil {
-			_ = object.Close()
-			log.Printf("recording stream write error stream=%s object=%s err=%v", key, objectName, err)
+	ch := active.subscribe()
+	defer active.unsubscribe(ch)
+
+	for {
+		select {
+		case pkt, ok := <-ch:
+			if !ok {
+				return
+			}
+			if err := muxer.WritePacket(pkt); err != nil {
+				log.Printf("flv live packet error stream=%s err=%v", key, err)
+				return
+			}
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		case <-active.closed:
 			return
 		}
+	}
+}
 
-		log.Printf("[RECORDING] chunk appended stream=%s object=%s bytes=%d", key, objectName, written)
+func resolveStreamKey(path string, cfg serverConfig) (string, error) {
+	trimmed := strings.Trim(path, "/")
+	if trimmed == "" {
+		return "", errors.New("missing application and stream key")
+	}
 
-		if err := object.Close(); err != nil {
-			log.Printf("recording close object error stream=%s object=%s err=%v", key, objectName, err)
+	parts := strings.Split(trimmed, "/")
+	if len(parts) < 2 {
+		return "", errors.New("expected /<app>/<streamKey>")
+	}
+
+	app := strings.TrimSpace(parts[0])
+	streamKey := strings.TrimSpace(parts[1])
+	if app == "" || streamKey == "" {
+		return "", errors.New("invalid app or stream key")
+	}
+
+	if app != cfg.RTMPApp {
+		return "", fmt.Errorf("invalid application %q, expected %q", app, cfg.RTMPApp)
+	}
+
+	if len(cfg.AllowedStreamKey) > 0 {
+		if _, ok := cfg.AllowedStreamKey[streamKey]; !ok {
+			return "", fmt.Errorf("stream key %q not allowed", streamKey)
 		}
 	}
 
-	log.Printf("[RECORDING] concatenation complete stream=%s", key)
+	return streamKey, nil
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -968,11 +681,4 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
 		log.Printf("json encode error: %v", err)
 	}
-}
-
-func safeFileName(name string) string {
-	cleaned := filepath.Base(name)
-	cleaned = strings.ReplaceAll(cleaned, "..", "")
-	cleaned = strings.ReplaceAll(cleaned, " ", "-")
-	return cleaned
 }

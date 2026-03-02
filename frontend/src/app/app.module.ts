@@ -12,7 +12,6 @@ import { StudentDashboardComponent } from './student/components/student-dashboar
 import { AdminDashboardComponent } from './admin/components/admin-dashboard.component';
 import { VideoPlayerComponent } from './shared/components/video-player.component';
 import { VideoGridComponent } from './shared/components/video-grid.component';
-import { LiveStreamListComponent } from './shared/components/live-stream-list.component';
 import { JwtInterceptor } from './shared/services/jwt.interceptor';
 import { CommonModule } from '@angular/common';
 
@@ -25,8 +24,7 @@ import { CommonModule } from '@angular/common';
     StudentDashboardComponent,
     AdminDashboardComponent,
     VideoPlayerComponent,
-    VideoGridComponent,
-    LiveStreamListComponent
+    VideoGridComponent
   ],
   imports: [
     BrowserModule,

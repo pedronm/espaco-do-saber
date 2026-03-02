@@ -42,8 +42,8 @@ public class KeycloakTokenProvider {
      * Exchange Keycloak user credentials for token
      * Used during login to verify user against Keycloak
      */
-    public String getKeycloakToken(String username, String password) throws Exception {
-        String tokenUrl = String.format("%s/realms/%s/protocol/openid-connect/token", 
+    public JsonNode getKeycloakTokenResponse(String username, String password) throws Exception {
+        String tokenUrl = String.format("%s/realms/%s/protocol/openid-connect/token",
             keycloakServerUrl, keycloakRealm);
 
         HttpHeaders headers = new HttpHeaders();
@@ -57,23 +57,42 @@ public class KeycloakTokenProvider {
         body.add("grant_type", "password");
         body.add("scope", "email openid profile");
 
-        log.info("Requesting Keycloak token for user: " + username);
-        log.info("Token URL: " + tokenUrl);
-        log.info("Request Body: " + body.toString());
-        log.info("Headers: " + headers.toString());
-        log.info("Client ID: " + clientId);
-        log.info("Client Secret: " + clientSecret);
-        
         HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
 
         try {
             String response = restTemplate.postForObject(tokenUrl, request, String.class);
-            JsonNode jsonNode = objectMapper.readTree(response);
-            log.info("Received Keycloak token for user: " + response);
-            return jsonNode.get("access_token").asText();   
+            return objectMapper.readTree(response);
         } catch (Exception e) {
             throw new RuntimeException("Failed to authenticate with Keycloak: " + e.getMessage());
         }
+    }
+
+    public JsonNode refreshKeycloakToken(String refreshToken) throws Exception {
+        String tokenUrl = String.format("%s/realms/%s/protocol/openid-connect/token",
+            keycloakServerUrl, keycloakRealm);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+
+        MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+        body.add("refresh_token", refreshToken);
+        body.add("client_id", clientId);
+        body.add("client_secret", clientSecret);
+        body.add("grant_type", "refresh_token");
+
+        HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
+
+        try {
+            String response = restTemplate.postForObject(tokenUrl, request, String.class);
+            return objectMapper.readTree(response);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to refresh token with Keycloak: " + e.getMessage());
+        }
+    }
+
+    public String getKeycloakToken(String username, String password) throws Exception {
+        JsonNode jsonNode = getKeycloakTokenResponse(username, password);
+        return jsonNode.get("access_token").asText();
     }
 
     /**

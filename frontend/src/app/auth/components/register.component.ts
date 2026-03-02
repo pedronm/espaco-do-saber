@@ -9,14 +9,14 @@ import { RegisterRequest } from '../../shared/models/user.model';
   template: `
     <div class="register-container">
       <div class="register-card">
-        <h2>Register - Espaço do Saber</h2>
+        <h2>Cadastro - Espaço do Saber</h2>
         <form (ngSubmit)="onSubmit()">
           <div class="form-group">
-            <label>Full Name</label>
+            <label>Nome completo</label>
             <input type="text" [(ngModel)]="registerData.fullName" name="fullName" required>
           </div>
           <div class="form-group">
-            <label>Username</label>
+            <label>Usuário</label>
             <input type="text" [(ngModel)]="registerData.username" name="username" required>
           </div>
           <div class="form-group">
@@ -24,21 +24,22 @@ import { RegisterRequest } from '../../shared/models/user.model';
             <input type="email" [(ngModel)]="registerData.email" name="email" required>
           </div>
           <div class="form-group">
-            <label>Password</label>
+            <label>Senha</label>
             <input type="password" [(ngModel)]="registerData.password" name="password" required>
           </div>
           <div class="form-group">
-            <label>Role</label>
-            <select [(ngModel)]="registerData.role" name="role" required>
-              <option value="STUDENT">Student</option>
-              <option value="TEACHER">Teacher</option>
+            <label>Tipo de cadastro</label>
+            <select [(ngModel)]="registerData.accessType" name="accessType" required>
+              <option value="PUBLICO">Público</option>
+              <option value="ALUNO">Aluno</option>
             </select>
           </div>
-          <button type="submit" class="btn-primary">Register</button>
+          <button type="submit" class="btn-primary">Enviar cadastro</button>
+          <div class="success" *ngIf="successMessage">{{ successMessage }}</div>
           <div class="error" *ngIf="error">{{ error }}</div>
         </form>
         <p class="login-link">
-          Already have an account? <a [routerLink]="['/login']">Login here</a>
+          Já tem conta? <a [routerLink]="['/login']">Entrar</a>
         </p>
       </div>
     </div>
@@ -99,6 +100,11 @@ import { RegisterRequest } from '../../shared/models/user.model';
       margin-top: 1rem;
       text-align: center;
     }
+    .success {
+      color: #2e7d32;
+      margin-top: 1rem;
+      text-align: center;
+    }
     .login-link {
       text-align: center;
       margin-top: 1rem;
@@ -116,9 +122,10 @@ export class RegisterComponent {
     email: '',
     password: '',
     fullName: '',
-    role: 'STUDENT'
+    accessType: 'PUBLICO'
   };
   error: string = '';
+  successMessage: string = '';
 
   constructor(
     private authService: AuthService,
@@ -126,34 +133,24 @@ export class RegisterComponent {
   ) {}
 
   onSubmit(): void {
+    this.error = '';
+    this.successMessage = '';
+
     this.authService.register(this.registerData).subscribe({
       next: (response) => {
-        const route = this.getDashboardRoute(response?.roles ?? []);
-        this.router.navigate([route]);
+        this.successMessage = response.message || 'Cadastro enviado com sucesso. Aguarde aprovação do administrador.';
+        this.registerData = {
+          username: '',
+          email: '',
+          password: '',
+          fullName: '',
+          accessType: 'PUBLICO'
+        };
+        setTimeout(() => this.router.navigate(['/login']), 2000);
       },
       error: (error) => {
-        this.error = error.error.message || 'Registration failed';
+        this.error = error.error.message || 'Falha no cadastro';
       }
     });
-  }
-
-  getDashboardRoute(roles: string[]): string {
-    let route = '/'
-    roles.forEach( role => {
-      switch (role) {
-        case 'ADMIN':
-          route ='/admin';
-          break;
-        case 'TEACHER':
-          route ='/teacher';
-          break;
-        case 'STUDENT':
-          route = '/student';
-          break;
-        default:
-          route = '/';
-      }
-    });
-    return route;
   }
 }

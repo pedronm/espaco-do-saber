@@ -238,22 +238,4 @@ public class VideoController {
         logLiveAuth("status", liveId, authentication);
         return ResponseEntity.ok(videoService.getLiveStreamStatus(liveId));
     }
-
-    @GetMapping("/stream/live/{liveId}/hls/index.m3u8")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<byte[]> streamLiveHlsManifest(@PathVariable String liveId, Authentication authentication) {
-        logLiveAuth("hls-manifest", liveId, authentication);
-        return videoService.getLiveHlsManifest(liveId);
-    }
-
-    @GetMapping("/stream/live/{liveId}/hls/{segmentFile}")
-    @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<byte[]> streamLiveHlsSegment(
-            @PathVariable String liveId,
-            @PathVariable String segmentFile,
-            Authentication authentication
-    ) {
-        logLiveAuth("hls-segment:" + segmentFile, liveId, authentication);
-        return videoService.getLiveHlsSegment(liveId, segmentFile);
-    }
 }

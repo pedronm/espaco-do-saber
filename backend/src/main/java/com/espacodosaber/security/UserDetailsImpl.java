@@ -21,6 +21,7 @@ public class UserDetailsImpl implements UserDetails {
     @JsonIgnore
     private String password;
     private String role;
+    private Boolean active;
 
     public static UserDetailsImpl build(User user) {
         return new UserDetailsImpl(
@@ -28,7 +29,8 @@ public class UserDetailsImpl implements UserDetails {
                 user.getUsername(),
                 user.getEmail(),
                 user.getPassword(),
-                user.getRole().name()
+                user.getRole().name(),
+                user.getActive()
         );
     }
 
@@ -54,6 +56,6 @@ public class UserDetailsImpl implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return true;
+        return Boolean.TRUE.equals(active);
     }
 }

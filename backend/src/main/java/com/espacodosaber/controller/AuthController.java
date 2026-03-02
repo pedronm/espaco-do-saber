@@ -1,6 +1,11 @@
 package com.espacodosaber.controller;
 
+import com.espacodosaber.dto.RegisterRequest;
+import com.espacodosaber.model.Role;
+import com.espacodosaber.model.User;
+import com.espacodosaber.repository.UserRepository;
 import com.espacodosaber.security.*;
+import com.espacodosaber.service.ObsStreamKeyService;
 import com.espacodosaber.dto.AuthRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -9,6 +14,7 @@ import lombok.extern.log4j.Log4j2;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
@@ -33,6 +39,15 @@ public class AuthController {
     @Autowired
     private KeycloakTokenProvider keycloakTokenProvider;
 
+    @Autowired
+    private ObsStreamKeyService obsStreamKeyService;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
     /**
      * Authenticate user with Keycloak and return the access token directly
      * 
@@ -55,10 +70,11 @@ public class AuthController {
         
         try {
             // Step 1: Validate credentials against Keycloak and get token
-            String keycloakToken = keycloakTokenProvider.getKeycloakToken(
+            JsonNode tokenResponse = keycloakTokenProvider.getKeycloakTokenResponse(
                 loginRequest.username(),
                 loginRequest.password()
             );
+            String keycloakToken = tokenResponse.get("access_token").asText();
 
             log.info("Successfully received Keycloak token");
 
@@ -70,6 +86,9 @@ public class AuthController {
             // Step 3: Build response with Keycloak token and user info
             Map<String, Object> response = new HashMap<>();
             response.put("access_token", keycloakToken);
+            response.put("refresh_token", tokenResponse.path("refresh_token").asText(""));
+            response.put("expires_in", tokenResponse.path("expires_in").asLong(0));
+            response.put("refresh_expires_in", tokenResponse.path("refresh_expires_in").asLong(0));
             response.put("token_type", "Bearer");
             response.put("username", userInfo.get("preferred_username").asText());
             response.put("email", userInfo.get("email").asText());
@@ -87,6 +106,27 @@ public class AuthController {
 
             response.put("roles", roles.isEmpty() ? List.of("STUDENT") : roles);
 
+            User dbUser = userRepository.findByUsername(loginRequest.username())
+                    .orElse(null);
+
+            if (dbUser == null) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("error", "user_not_registered");
+                errorResponse.put("message", "Usuário não cadastrado no sistema.");
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorResponse);
+            }
+
+            if (!Boolean.TRUE.equals(dbUser.getActive())) {
+                Map<String, Object> errorResponse = new HashMap<>();
+                errorResponse.put("error", "pending_approval");
+                errorResponse.put("message", "Seu cadastro ainda está pendente de aprovação do administrador.");
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorResponse);
+            }
+
+            if (roles.contains("ADMIN") || roles.contains("TEACHER")) {
+                response.put("obs_stream_key", obsStreamKeyService.generateForUsername(loginRequest.username()));
+            }
+
             return ResponseEntity.ok(response);
 
         } catch (Exception e) {
@@ -100,6 +140,66 @@ public class AuthController {
             return ResponseEntity
                 .status(HttpStatus.UNAUTHORIZED)
                 .body(errorResponse);
+        }
+    }
+
+    @PostMapping("/register")
+    public ResponseEntity<?> register(@RequestBody RegisterRequest registerRequest) {
+        if (userRepository.existsByUsername(registerRequest.getUsername())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "username_exists",
+                    "message", "Nome de usuário já existe"
+            ));
+        }
+
+        if (userRepository.existsByEmail(registerRequest.getEmail())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "email_exists",
+                    "message", "Email já está em uso"
+            ));
+        }
+
+        User user = new User();
+        user.setUsername(registerRequest.getUsername());
+        user.setEmail(registerRequest.getEmail());
+        user.setPassword(passwordEncoder.encode(registerRequest.getPassword()));
+        user.setFullName(registerRequest.getFullName());
+        user.setRole(Role.STUDENT);
+        user.setActive(false);
+
+        userRepository.save(user);
+
+        return ResponseEntity.status(HttpStatus.CREATED).body(Map.of(
+                "message", "Cadastro recebido. Aguarde aprovação do administrador para acessar o sistema.",
+                "pendingApproval", true
+        ));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<?> refreshToken(@RequestBody Map<String, String> body) {
+        String refreshToken = body.get("refresh_token");
+        if (refreshToken == null || refreshToken.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                "error", "invalid_request",
+                "message", "refresh_token is required"
+            ));
+        }
+
+        try {
+            JsonNode tokenResponse = keycloakTokenProvider.refreshKeycloakToken(refreshToken);
+            Map<String, Object> response = new HashMap<>();
+            response.put("access_token", tokenResponse.path("access_token").asText(""));
+            response.put("refresh_token", tokenResponse.path("refresh_token").asText(refreshToken));
+            response.put("expires_in", tokenResponse.path("expires_in").asLong(0));
+            response.put("refresh_expires_in", tokenResponse.path("refresh_expires_in").asLong(0));
+            response.put("token_type", tokenResponse.path("token_type").asText("Bearer"));
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                "error", "invalid_token",
+                "message", "Unable to refresh token",
+                "details", e.getMessage()
+            ));
         }
     }
 
@@ -145,4 +245,5 @@ public class AuthController {
                 .body(errorResponse);
         }
     }
+
 }

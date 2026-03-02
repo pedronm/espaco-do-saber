@@ -1,7 +1,9 @@
-import { Component } from '@angular/core';
+import { Component, OnDestroy, OnInit } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from './shared/services/auth.service';
 import { environment } from '../environments/environment';
+import { LiveStreamPresenceService } from './shared/services/live-stream-presence.service';
+import { Subscription } from 'rxjs';
 
 @Component({
   standalone: false,
@@ -16,12 +18,12 @@ import { environment } from '../environments/environment';
         <div class="nav-links">
           <a [routerLink]="getDashboardRoute()" routerLinkActive="active">Quadro de aulas</a>
           <a *ngIf="isTeacher || isAdmin" [routerLink]="['/teacher']" routerLinkActive="active">Minhas gravações</a>
-          <a *ngIf="isTeacher || isAdmin" [routerLink]="['/live']" routerLinkActive="active">Live</a>
           <a [routerLink]="['/videos']" routerLinkActive="active">Videos</a>
           <button (click)="logout()" class="btn-logout">Sair</button>
         </div>
       </nav>
       <main class="main-content">
+        <div class="live-toast" *ngIf="liveToastMessage">{{ liveToastMessage }}</div>
         <router-outlet></router-outlet>
       </main>
     </div>
@@ -86,16 +88,51 @@ import { environment } from '../environments/environment';
     .main-content {
       padding: 2rem;
     }
+    .live-toast {
+      background: #fff3cd;
+      color: #856404;
+      border: 1px solid #ffeeba;
+      border-radius: 6px;
+      padding: 0.75rem 1rem;
+      margin-bottom: 1rem;
+      font-weight: 600;
+    }
   `]
 })
-export class AppComponent {
+export class AppComponent implements OnInit, OnDestroy {
   logoPath = environment.appLogo;
   logoAlt = 'Espaço do Saber Logo';
+  liveToastMessage: string = '';
+
+  private liveNotificationSubscription?: Subscription;
+  private toastTimeout?: ReturnType<typeof setTimeout>;
 
   constructor(
     private authService: AuthService,
-    private router: Router
+    private router: Router,
+    private liveStreamPresenceService: LiveStreamPresenceService
   ) {}
+
+  ngOnInit(): void {
+    this.liveStreamPresenceService.startWatching();
+    this.liveNotificationSubscription = this.liveStreamPresenceService.onNewStream().subscribe((streamId) => {
+      this.liveToastMessage = `Nova transmissão ao vivo iniciada: ${streamId}`;
+      if (this.toastTimeout) {
+        clearTimeout(this.toastTimeout);
+      }
+      this.toastTimeout = setTimeout(() => {
+        this.liveToastMessage = '';
+      }, 6000);
+    });
+  }
+
+  ngOnDestroy(): void {
+    this.liveNotificationSubscription?.unsubscribe();
+    this.liveStreamPresenceService.stopWatching();
+    if (this.toastTimeout) {
+      clearTimeout(this.toastTimeout);
+    }
+  }
 
   get isAuthenticated(): boolean {
     return this.authService.isAuthenticated();

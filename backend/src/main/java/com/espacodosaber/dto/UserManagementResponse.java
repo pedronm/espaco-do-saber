@@ -4,11 +4,11 @@ import com.espacodosaber.model.Role;
 import lombok.Data;
 
 @Data
-public class RegisterRequest {
+public class UserManagementResponse {
+    private Long id;
     private String username;
     private String email;
-    private String password;
     private String fullName;
     private Role role;
-    private String accessType;
+    private Boolean active;
 }

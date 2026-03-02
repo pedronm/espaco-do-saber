@@ -1,9 +1,11 @@
 package com.espacodosaber.service;
 
 import com.espacodosaber.dto.PresignedUrlResponse;
+import com.espacodosaber.dto.StreamFinalizedRequest;
 import com.espacodosaber.dto.VideoProcessingResponse;
 import com.espacodosaber.dto.VideoRequest;
 import com.espacodosaber.dto.VideoResponse;
+import com.espacodosaber.model.Role;
 import com.espacodosaber.model.User;
 import com.espacodosaber.model.Video;
 import com.espacodosaber.model.VideoAccess;
@@ -16,7 +18,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
@@ -346,7 +347,46 @@ public class VideoService {
         recordedLive.setFilePath(storageKey);
         recordedLive.setTeacher(teacher);
         recordedLive.setDuration(Math.max(0L, (long) finalSequence));
-        recordedLive.setIsLive(true);
+        recordedLive.setIsLive(false);
+        recordedLive.setWasLive(true);
+        recordedLive.setIsPublic(true);
+
+        Video savedVideo = videoRepository.save(recordedLive);
+        VideoResponse response = convertToResponse(savedVideo);
+        response.setStreamingUrl(getVideoUrl(savedVideo));
+        return response;
+    }
+
+    public VideoResponse registerFinalizedLiveStream(StreamFinalizedRequest request) {
+        if (request == null || request.getLiveId() == null || request.getLiveId().isBlank()) {
+            throw new RuntimeException("LiveId inválido para finalizar stream");
+        }
+
+        String storageKey = "live:" + request.getLiveId();
+        Optional<Video> existingVideo = videoRepository.findByFilePath(storageKey);
+        if (existingVideo.isPresent()) {
+            VideoResponse existingResponse = convertToResponse(existingVideo.get());
+            existingResponse.setStreamingUrl(getVideoUrl(existingVideo.get()));
+            return existingResponse;
+        }
+
+        String guessedUsername = request.getLiveId().split("-")[0];
+        User teacher = userRepository.findByUsername(guessedUsername)
+                .or(() -> userRepository.findAll().stream()
+                        .filter(user -> user.getRole() == Role.TEACHER || user.getRole() == Role.ADMIN)
+                        .findFirst())
+                .orElseThrow(() -> new RuntimeException("No teacher/admin user found to assign finalized stream"));
+
+        Video recordedLive = new Video();
+        String readableDate = LocalDateTime.now().format(LIVE_TITLE_FORMATTER);
+        recordedLive.setTitle("Live gravada em " + readableDate);
+        String storageRef = request.getStorageObject() == null ? "N/A" : request.getStorageObject();
+        recordedLive.setDescription("Transmissão ao vivo encerrada e salva automaticamente. Objeto: " + storageRef);
+        recordedLive.setFilePath(storageKey);
+        recordedLive.setTeacher(teacher);
+        recordedLive.setDuration(Math.max(0L, request.getDurationSeconds() == null ? 0L : request.getDurationSeconds()));
+        recordedLive.setIsLive(false);
+        recordedLive.setWasLive(true);
         recordedLive.setIsPublic(true);
 
         Video savedVideo = videoRepository.save(recordedLive);
@@ -412,48 +452,13 @@ public class VideoService {
             }
 
             HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.parseMediaType("video/webm"));
+                MediaType upstreamContentType = upstream.getHeaders().getContentType();
+                headers.setContentType(upstreamContentType != null ? upstreamContentType : MediaType.parseMediaType("video/x-flv"));
             return ResponseEntity.ok()
                     .headers(headers)
                     .body(body);
         } catch (Exception e) {
             logger.warn("Falha ao recuperar gravação ao vivo {}: {}", liveId, e.getMessage());
-            return ResponseEntity.notFound().build();
-        }
-    }
-
-    public ResponseEntity<byte[]> getLiveHlsManifest(String liveId) {
-        return proxyLiveStreamByteResponse(
-                videoStreamingUrl + "/streams/" + liveId + "/hls/index.m3u8",
-                "application/vnd.apple.mpegurl"
-        );
-    }
-
-    public ResponseEntity<byte[]> getLiveHlsSegment(String liveId, String segmentFile) {
-        return proxyLiveStreamByteResponse(
-                videoStreamingUrl + "/streams/" + liveId + "/hls/" + segmentFile,
-                "video/webm"
-        );
-    }
-
-    private ResponseEntity<byte[]> proxyLiveStreamByteResponse(String url, String fallbackContentType) {
-        try {
-            ResponseEntity<byte[]> upstream = pyRest.exchange(url, HttpMethod.GET, null, byte[].class);
-            byte[] body = upstream.getBody();
-            if (body == null || body.length == 0) {
-                return ResponseEntity.notFound().build();
-            }
-
-            HttpHeaders headers = new HttpHeaders();
-            MediaType contentType = upstream.getHeaders().getContentType();
-            if (contentType == null) {
-                contentType = MediaType.parseMediaType(fallbackContentType);
-            }
-
-            headers.setContentType(contentType);
-            return new ResponseEntity<>(body, headers, HttpStatus.OK);
-        } catch (Exception e) {
-            logger.warn("Falha ao recuperar stream de {}: {}", url, e.getMessage());
             return ResponseEntity.notFound().build();
         }
     }
@@ -506,6 +511,7 @@ public class VideoService {
         response.setTeacherName(video.getTeacher().getFullName());
         response.setDuration(video.getDuration());
         response.setIsLive(video.getIsLive());
+        response.setWasLive(video.getWasLive());
         response.setIsPublic(video.getIsPublic());
         response.setUploadedAt(video.getUploadedAt());
         response.setStreamingUrl(video.getFilePath());

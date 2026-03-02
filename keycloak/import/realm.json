@@ -163,6 +163,101 @@
         "STUDENT" 
       ],
       "clientRoles": {}
+    },
+    {
+      "username": "aluno2",
+      "email": "aluno2@espacodosaber.com",
+      "emailVerified": true,
+      "firstName": "Ana",
+      "lastName": "Aluno",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "aluno123"
+        }
+      ],
+      "realmRoles": [
+        "default-roles-espacodosaber",
+        "STUDENT"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "aluno3",
+      "email": "aluno3@espacodosaber.com",
+      "emailVerified": true,
+      "firstName": "Bruno",
+      "lastName": "Aluno",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "aluno123"
+        }
+      ],
+      "realmRoles": [
+        "default-roles-espacodosaber",
+        "STUDENT"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "aluno4",
+      "email": "aluno4@espacodosaber.com",
+      "emailVerified": true,
+      "firstName": "Carla",
+      "lastName": "Aluno",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "aluno123"
+        }
+      ],
+      "realmRoles": [
+        "default-roles-espacodosaber",
+        "STUDENT"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "aluno5",
+      "email": "aluno5@espacodosaber.com",
+      "emailVerified": true,
+      "firstName": "Diego",
+      "lastName": "Aluno",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "aluno123"
+        }
+      ],
+      "realmRoles": [
+        "default-roles-espacodosaber",
+        "STUDENT"
+      ],
+      "clientRoles": {}
+    },
+    {
+      "username": "aluno6",
+      "email": "aluno6@espacodosaber.com",
+      "emailVerified": true,
+      "firstName": "Elisa",
+      "lastName": "Aluno",
+      "enabled": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "aluno123"
+        }
+      ],
+      "realmRoles": [
+        "default-roles-espacodosaber",
+        "STUDENT"
+      ],
+      "clientRoles": {}
     }
   ]
 }
