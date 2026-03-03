@@ -103,7 +103,7 @@ public class VideoService {
 
     private String getVideoUrl(Video video) {
         if (video.getFilePath() != null && video.getFilePath().startsWith("live:")) {
-            return videoApiBaseUrl + "/api/videos/stream/live/" + extractLiveId(video.getFilePath()) + "/recording";
+            return "/streaming/streams/" + extractLiveId(video.getFilePath()) + "/recording";
         }
 
         // For live streams, return the live stream endpoint from Go server
@@ -426,17 +426,17 @@ public class VideoService {
         Map<String, Object> response = new HashMap<>();
         String storageKey = "live:" + liveId;
 
+        List<String> activeStreams = getActiveStreamIds();
+        if (activeStreams.contains(liveId)) {
+            response.put("status", "ACTIVE");
+            return response;
+        }
+
         Optional<Video> existingVideo = videoRepository.findByFilePath(storageKey);
         if (existingVideo.isPresent()) {
             response.put("status", "COMPLETED");
             response.put("videoId", existingVideo.get().getId());
             response.put("title", existingVideo.get().getTitle());
-            return response;
-        }
-
-        List<String> activeStreams = getActiveStreamIds();
-        if (activeStreams.contains(liveId)) {
-            response.put("status", "ACTIVE");
             return response;
         }
 
