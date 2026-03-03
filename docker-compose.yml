@@ -1,4 +1,13 @@
 services:
+  cloudflaretunnel:
+    container_name: espacodosaber-cloudflared
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    environment: 
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    command: tunnel --no-autoupdate run
+    networks:
+      - app-network
   postgres:
     image: postgres:17-alpine
     container_name: espacodosaber-db
@@ -84,10 +93,10 @@ services:
     environment:
       GCS_BUCKET: ${GCS_BUCKET:-videos}
       GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/key.json
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/var/secrets/google/key.json:ro
     ports:
       - "8000:8000"
-    volumes:
-      - ./secrets/gcp:/var/secrets/google:ro
     networks:
       - app-network
   video-streaming:
@@ -100,12 +109,12 @@ services:
       RTMP_PUBLIC_HOST: localhost
       BACKEND_BASE_URL: http://backend:8080
       STREAMING_FINALIZATION_INTERNAL_TOKEN: ${STREAMING_FINALIZATION_INTERNAL_TOKEN:-internal-stream-finalize-token}
+    volumes:
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/var/secrets/google/key.json:ro
     ports:
       - "1935:1935"
       - "8083:8083"
       - "5005:5005/udp"
-    volumes:
-      - ./secrets/gcp:/var/secrets/google:ro
     networks:
       - app-network
   frontend:
