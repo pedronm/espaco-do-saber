@@ -4,8 +4,11 @@ import com.espacodosaber.dto.UserManagementResponse;
 import com.espacodosaber.model.Role;
 import com.espacodosaber.model.User;
 import com.espacodosaber.repository.UserRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
 
@@ -19,17 +22,19 @@ public class UserManagementService {
     }
 
     public List<UserManagementResponse> listPendingRegistrations() {
-        return userRepository.findByActive(false)
+        return userRepository.findByActiveOrderByCreatedAtDesc(false)
                 .stream()
-                .sorted(Comparator.comparing(User::getCreatedAt).reversed())
                 .map(this::toResponse)
                 .toList();
     }
 
+    public Page<UserManagementResponse> listUsers(Pageable pageable) {
+        return userRepository.findAllByOrderByCreatedAtDesc(pageable)
+                .map(this::toResponse);
+    }
+
     public List<UserManagementResponse> listUsers() {
-        return userRepository.findAll()
-                .stream()
-                .sorted(Comparator.comparing(User::getCreatedAt).reversed())
+        return userRepository.findAllByOrderByCreatedAtDesc(Pageable.unpaged())
                 .map(this::toResponse)
                 .toList();
     }
@@ -83,6 +88,21 @@ public class UserManagementService {
         return toResponse(userRepository.save(user));
     }
 
+    public UserManagementResponse expireUserPassword(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("Usuário não encontrado"));
+
+        user.setPasswordExpiresAt(LocalDateTime.now());
+        return toResponse(userRepository.save(user));
+    }
+
+    public void clearPasswordExpiration(String username) {
+        userRepository.findByUsername(username).ifPresent(user -> {
+            user.setPasswordExpiresAt(null);
+            userRepository.save(user);
+        });
+    }
+
     private UserManagementResponse toResponse(User user) {
         UserManagementResponse response = new UserManagementResponse();
         response.setId(user.getId());
@@ -91,6 +111,7 @@ public class UserManagementService {
         response.setFullName(user.getFullName());
         response.setRole(user.getRole());
         response.setActive(user.getActive());
+        response.setPasswordExpiresAt(user.getPasswordExpiresAt());
         return response;
     }
 }

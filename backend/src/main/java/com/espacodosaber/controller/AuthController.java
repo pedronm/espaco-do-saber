@@ -1,11 +1,13 @@
 package com.espacodosaber.controller;
 
 import com.espacodosaber.dto.RegisterRequest;
+import com.espacodosaber.dto.ChangePasswordRequest;
 import com.espacodosaber.model.Role;
 import com.espacodosaber.model.User;
 import com.espacodosaber.repository.UserRepository;
 import com.espacodosaber.security.*;
 import com.espacodosaber.service.ObsStreamKeyService;
+import com.espacodosaber.service.UserManagementService;
 import com.espacodosaber.dto.AuthRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 
@@ -47,6 +49,9 @@ public class AuthController {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private UserManagementService userManagementService;
 
     /**
      * Authenticate user with Keycloak and return the access token directly
@@ -123,6 +128,11 @@ public class AuthController {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).body(errorResponse);
             }
 
+            boolean passwordChangeRequired = dbUser.getPasswordExpiresAt() != null
+                    && !dbUser.getPasswordExpiresAt().isAfter(java.time.LocalDateTime.now());
+
+            response.put("passwordChangeRequired", passwordChangeRequired);
+
             if (roles.contains("ADMIN") || roles.contains("TEACHER")) {
                 response.put("obs_stream_key", obsStreamKeyService.generateForUsername(loginRequest.username()));
             }
@@ -145,6 +155,14 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<?> register(@RequestBody RegisterRequest registerRequest) {
+        if (registerRequest.getPassword() == null || registerRequest.getConfirmPassword() == null
+                || !registerRequest.getPassword().equals(registerRequest.getConfirmPassword())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "password_mismatch",
+                    "message", "A confirmação de senha não confere"
+            ));
+        }
+
         if (userRepository.existsByUsername(registerRequest.getUsername())) {
             return ResponseEntity.badRequest().body(Map.of(
                     "error", "username_exists",
@@ -173,6 +191,64 @@ public class AuthController {
                 "message", "Cadastro recebido. Aguarde aprovação do administrador para acessar o sistema.",
                 "pendingApproval", true
         ));
+    }
+
+    @PostMapping("/change-password")
+    public ResponseEntity<?> changePassword(
+            @RequestHeader(value = "Authorization", required = false) String authorization,
+            @RequestBody ChangePasswordRequest request
+    ) {
+        if (authorization == null || !authorization.startsWith("Bearer ")) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of(
+                    "error", "unauthorized",
+                    "message", "Token de autenticação inválido"
+            ));
+        }
+
+        if (request.getNewPassword() == null || request.getConfirmNewPassword() == null
+                || !request.getNewPassword().equals(request.getConfirmNewPassword())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "password_mismatch",
+                    "message", "A confirmação da nova senha não confere"
+            ));
+        }
+
+        if (request.getCurrentPassword() == null || request.getCurrentPassword().isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "invalid_current_password",
+                    "message", "Senha atual é obrigatória"
+            ));
+        }
+
+        if (request.getCurrentPassword().equals(request.getNewPassword())) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "password_not_changed",
+                    "message", "A nova senha deve ser diferente da senha atual"
+            ));
+        }
+
+        String accessToken = authorization.substring(7);
+
+        try {
+            JsonNode userInfo = keycloakTokenProvider.getUserInfoFromKeycloak(accessToken);
+            String username = userInfo.path("preferred_username").asText();
+
+            keycloakTokenProvider.changePassword(accessToken, request.getCurrentPassword(), request.getNewPassword());
+
+            userRepository.findByUsername(username).ifPresent(user -> {
+                user.setPassword(passwordEncoder.encode(request.getNewPassword()));
+                userRepository.save(user);
+            });
+            userManagementService.clearPasswordExpiration(username);
+
+            return ResponseEntity.ok(Map.of("message", "Senha alterada com sucesso"));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of(
+                    "error", "password_change_failed",
+                    "message", "Não foi possível alterar a senha",
+                    "details", e.getMessage()
+            ));
+        }
     }
 
     @PostMapping("/refresh")

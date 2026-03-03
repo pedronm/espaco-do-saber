@@ -10,6 +10,15 @@ export interface ManagedUser {
   fullName: string;
   role: 'ADMIN' | 'TEACHER' | 'STUDENT';
   active: boolean;
+  passwordExpiresAt?: string | null;
+}
+
+export interface PagedUsersResponse {
+  content: ManagedUser[];
+  totalElements: number;
+  totalPages: number;
+  size: number;
+  number: number;
 }
 
 @Injectable({
@@ -20,8 +29,8 @@ export class UserManagementService {
 
   constructor(private http: HttpClient) {}
 
-  getAllUsers(): Observable<ManagedUser[]> {
-    return this.http.get<ManagedUser[]>(this.adminApiUrl);
+  getAllUsers(page: number, size: number): Observable<PagedUsersResponse> {
+    return this.http.get<PagedUsersResponse>(`${this.adminApiUrl}?page=${page}&size=${size}`);
   }
 
   getPendingUsers(): Observable<ManagedUser[]> {
@@ -38,5 +47,9 @@ export class UserManagementService {
 
   updateUserRole(userId: number, role: 'TEACHER' | 'STUDENT'): Observable<ManagedUser> {
     return this.http.put<ManagedUser>(`${this.adminApiUrl}/${userId}/role`, { role });
+  }
+
+  expireUserPassword(userId: number): Observable<ManagedUser> {
+    return this.http.post<ManagedUser>(`${this.adminApiUrl}/${userId}/password/expire`, {});
   }
 }

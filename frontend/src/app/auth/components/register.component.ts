@@ -28,6 +28,10 @@ import { RegisterRequest } from '../../shared/models/user.model';
             <input type="password" [(ngModel)]="registerData.password" name="password" required>
           </div>
           <div class="form-group">
+            <label>Confirmar senha</label>
+            <input type="password" [(ngModel)]="registerData.confirmPassword" name="confirmPassword" required>
+          </div>
+          <div class="form-group">
             <label>Tipo de cadastro</label>
             <select [(ngModel)]="registerData.accessType" name="accessType" required>
               <option value="PUBLICO">Público</option>
@@ -121,6 +125,7 @@ export class RegisterComponent {
     username: '',
     email: '',
     password: '',
+    confirmPassword: '',
     fullName: '',
     accessType: 'PUBLICO'
   };
@@ -136,6 +141,11 @@ export class RegisterComponent {
     this.error = '';
     this.successMessage = '';
 
+    if (this.registerData.password !== this.registerData.confirmPassword) {
+      this.error = 'A confirmação de senha não confere';
+      return;
+    }
+
     this.authService.register(this.registerData).subscribe({
       next: (response) => {
         this.successMessage = response.message || 'Cadastro enviado com sucesso. Aguarde aprovação do administrador.';
@@ -143,6 +153,7 @@ export class RegisterComponent {
           username: '',
           email: '',
           password: '',
+          confirmPassword: '',
           fullName: '',
           accessType: 'PUBLICO'
         };

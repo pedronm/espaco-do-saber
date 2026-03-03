@@ -132,22 +132,27 @@ func (s *stream) close() {
 }
 
 func loadMinioConfig() minioConfig {
-	endpoint := os.Getenv("MINIO_ENDPOINT")
-	port := os.Getenv("MINIO_PORT")
-	if endpoint == "" {
-		endpoint = "video-storage"
-	}
-	if port == "" {
-		port = "9000"
-	}
-
+	rawEndpoint := envFirst("OB_STR_ENDPOINT", "MINIO_ENDPOINT", "video-storage")
+	endpoint := rawEndpoint
 	secure := strings.ToLower(os.Getenv("MINIO_SECURE")) == "true"
 
+	if parsed, err := url.Parse(rawEndpoint); err == nil && parsed.Hostname() != "" {
+		endpoint = parsed.Host
+		if parsed.Scheme == "https" {
+			secure = true
+		} else if parsed.Scheme == "http" {
+			secure = false
+		}
+	} else {
+		port := envOrDefault("MINIO_PORT", "9000")
+		endpoint = fmt.Sprintf("%s:%s", rawEndpoint, port)
+	}
+
 	return minioConfig{
-		Endpoint:  fmt.Sprintf("%s:%s", endpoint, port),
-		AccessKey: envOrDefault("MINIO_ACCESS_KEY", "minioadmin"),
-		SecretKey: envOrDefault("MINIO_SECRET_KEY", "minioadmin"),
-		Bucket:    envOrDefault("MINIO_BUCKET", "videos"),
+		Endpoint:  endpoint,
+		AccessKey: envFirst("OB_STR_API_KEY", "MINIO_ACCESS_KEY", "minioadmin"),
+		SecretKey: envFirst("OB_STR_SECRET_KEY", "MINIO_SECRET_KEY", "minioadmin"),
+		Bucket:    envFirst("OB_STR_BUCKET", "MINIO_BUCKET", "videos"),
 		Secure:    secure,
 	}
 }
@@ -183,6 +188,14 @@ func envOrDefault(name, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func envFirst(name1, name2, fallback string) string {
+	value := os.Getenv(name1)
+	if value != "" {
+		return value
+	}
+	return envOrDefault(name2, fallback)
 }
 
 func ensureBucket(ctx context.Context, client *minio.Client, bucket string) error {
@@ -302,6 +315,10 @@ func handlePublish(conn *rtmp.Conn, hub *streamHub, minioClient *minio.Client, b
 			break
 		}
 		active.broadcast(pkt)
+	}
+
+	if err := muxer.WriteTrailer(); err != nil {
+		log.Printf("flv trailer error: %v", err)
 	}
 
 	if err := tempFile.Close(); err != nil {

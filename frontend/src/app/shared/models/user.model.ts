@@ -15,8 +15,15 @@ export interface RegisterRequest {
   username: string;
   email: string;
   password: string;
+  confirmPassword: string;
   fullName: string;
   accessType: 'PUBLICO' | 'ALUNO';
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+  confirmNewPassword: string;
 }
 
 export interface RegisterResponse {
@@ -36,4 +43,5 @@ export interface AuthResponse {
   username?: string;
   email?: string;
   roles?: string[];
+  passwordChangeRequired?: boolean;
 }

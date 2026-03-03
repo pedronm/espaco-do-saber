@@ -3,6 +3,9 @@ package com.espacodosaber.controller;
 import com.espacodosaber.dto.UserManagementResponse;
 import com.espacodosaber.dto.UserRoleUpdateRequest;
 import com.espacodosaber.service.UserManagementService;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -21,8 +24,12 @@ public class AdminUserController {
     }
 
     @GetMapping
-    public ResponseEntity<List<UserManagementResponse>> listUsers() {
-        return ResponseEntity.ok(userManagementService.listUsers());
+    public ResponseEntity<Page<UserManagementResponse>> listUsers(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        Pageable pageable = PageRequest.of(page, size);
+        return ResponseEntity.ok(userManagementService.listUsers(pageable));
     }
 
     @GetMapping("/pending")
@@ -47,5 +54,10 @@ public class AdminUserController {
             @RequestBody UserRoleUpdateRequest request
     ) {
         return ResponseEntity.ok(userManagementService.updateUserRoleAsAdmin(id, request.getRole()));
+    }
+
+    @PostMapping("/{id}/password/expire")
+    public ResponseEntity<UserManagementResponse> expireUserPassword(@PathVariable Long id) {
+        return ResponseEntity.ok(userManagementService.expireUserPassword(id));
     }
 }

@@ -16,6 +16,8 @@ import com.espacodosaber.repository.VideoRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ByteArrayResource;
+import org.springframework.core.io.InputStreamResource;
+import org.springframework.core.io.Resource;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
@@ -31,6 +33,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -439,24 +444,41 @@ public class VideoService {
         return response;
     }
 
-    public ResponseEntity<byte[]> getLiveRecording(String liveId) {
+    public ResponseEntity<Resource> getLiveRecording(String liveId) {
         try {
-            ResponseEntity<byte[]> upstream = pyRest.getForEntity(
-                    videoStreamingUrl + "/streams/" + liveId + "/recording",
-                    byte[].class
-            );
+            URL url = new URL(videoStreamingUrl + "/streams/" + liveId + "/recording");
+            HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(0);
 
-            byte[] body = upstream.getBody();
-            if (body == null || body.length == 0) {
+            int statusCode = connection.getResponseCode();
+            if (statusCode >= 300) {
                 return ResponseEntity.notFound().build();
             }
 
+            InputStream inputStream = connection.getInputStream();
+            InputStreamResource resource = new InputStreamResource(inputStream);
+
             HttpHeaders headers = new HttpHeaders();
-                MediaType upstreamContentType = upstream.getHeaders().getContentType();
-                headers.setContentType(upstreamContentType != null ? upstreamContentType : MediaType.parseMediaType("video/x-flv"));
+            String contentType = connection.getContentType();
+            headers.setContentType(contentType != null
+                    ? MediaType.parseMediaType(contentType)
+                    : MediaType.parseMediaType("video/x-flv"));
+
+            String contentDisposition = connection.getHeaderField(HttpHeaders.CONTENT_DISPOSITION);
+            if (contentDisposition != null && !contentDisposition.isBlank()) {
+                headers.set(HttpHeaders.CONTENT_DISPOSITION, contentDisposition);
+            }
+
+            String recordingFilename = connection.getHeaderField("X-Recording-Filename");
+            if (recordingFilename != null && !recordingFilename.isBlank()) {
+                headers.set("X-Recording-Filename", recordingFilename);
+            }
+
             return ResponseEntity.ok()
                     .headers(headers)
-                    .body(body);
+                    .body(resource);
         } catch (Exception e) {
             logger.warn("Falha ao recuperar gravação ao vivo {}: {}", liveId, e.getMessage());
             return ResponseEntity.notFound().build();

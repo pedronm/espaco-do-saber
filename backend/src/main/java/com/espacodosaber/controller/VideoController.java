@@ -227,7 +227,7 @@ public class VideoController {
 
     @GetMapping("/stream/live/{liveId}/recording")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<byte[]> streamLiveRecording(@PathVariable String liveId, Authentication authentication) {
+    public ResponseEntity<Resource> streamLiveRecording(@PathVariable String liveId, Authentication authentication) {
         logLiveAuth("recording", liveId, authentication);
         return videoService.getLiveRecording(liveId);
     }

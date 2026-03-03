@@ -45,6 +45,9 @@ public class User {
     @Column
     private LocalDateTime lastAccess;
 
+    @Column
+    private LocalDateTime passwordExpiresAt;
+
     @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
     private Set<AccessLog> accessLogs = new HashSet<>();
 

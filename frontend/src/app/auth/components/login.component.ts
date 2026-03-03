@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../shared/services/auth.service';
-import { LoginRequest } from '../../shared/models/user.model';
+import { ChangePasswordRequest, LoginRequest } from '../../shared/models/user.model';
 
 @Component({
   standalone: false,
@@ -22,6 +22,26 @@ import { LoginRequest } from '../../shared/models/user.model';
           <button type="submit" class="btn-primary">Login</button>
           <div class="error" *ngIf="error">{{ error }}</div>
         </form>
+
+        <div class="password-change-box" *ngIf="requiresPasswordChange">
+          <h3>Troca de senha obrigatória</h3>
+          <p>Seu acesso requer atualização de senha antes de continuar.</p>
+          <form (ngSubmit)="onChangePassword()">
+            <div class="form-group">
+              <label>Senha atual</label>
+              <input type="password" [(ngModel)]="passwordChange.currentPassword" name="currentPassword" required>
+            </div>
+            <div class="form-group">
+              <label>Nova senha</label>
+              <input type="password" [(ngModel)]="passwordChange.newPassword" name="newPassword" required>
+            </div>
+            <div class="form-group">
+              <label>Confirmar nova senha</label>
+              <input type="password" [(ngModel)]="passwordChange.confirmNewPassword" name="confirmNewPassword" required>
+            </div>
+            <button type="submit" class="btn-primary">Alterar senha</button>
+          </form>
+        </div>
         <p class="register-link">
           Cadastre-se <a [routerLink]="['/register']">aqui</a>
         </p>
@@ -89,6 +109,21 @@ import { LoginRequest } from '../../shared/models/user.model';
       margin-top: 1rem;
       color: #555;
     }
+    .password-change-box {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid #ececec;
+    }
+    .password-change-box h3 {
+      margin: 0 0 0.5rem;
+      color: #333;
+      font-size: 1rem;
+    }
+    .password-change-box p {
+      margin: 0 0 1rem;
+      color: #555;
+      font-size: 0.9rem;
+    }
     .register-link a {
       color: #1976d2;
       text-decoration: none;
@@ -101,6 +136,13 @@ export class LoginComponent {
     password: ''
   };
   error: string = '';
+  requiresPasswordChange: boolean = false;
+  pendingRoles: string[] = [];
+  passwordChange: ChangePasswordRequest = {
+    currentPassword: '',
+    newPassword: '',
+    confirmNewPassword: ''
+  };
 
   constructor(
     private authService: AuthService,
@@ -108,13 +150,47 @@ export class LoginComponent {
   ) {}
 
   onSubmit(): void {
+    this.error = '';
     this.authService.login(this.credentials).subscribe({
       next: (response) => {
-        const route = this.getDashboardRoute(response.roles ?? []);
+        this.pendingRoles = response.roles ?? [];
+        this.requiresPasswordChange = !!response.passwordChangeRequired;
+
+        if (this.requiresPasswordChange) {
+          return;
+        }
+
+        const route = this.getDashboardRoute(this.pendingRoles);
         this.router.navigate([route]);
       },
       error: (error) => {
         this.error = 'Invalid username or password';
+      }
+    });
+  }
+
+  onChangePassword(): void {
+    this.error = '';
+
+    if (this.passwordChange.newPassword !== this.passwordChange.confirmNewPassword) {
+      this.error = 'A confirmação da nova senha não confere';
+      return;
+    }
+
+    this.authService.changePassword(this.passwordChange).subscribe({
+      next: () => {
+        this.requiresPasswordChange = false;
+        this.passwordChange = {
+          currentPassword: '',
+          newPassword: '',
+          confirmNewPassword: ''
+        };
+
+        const route = this.getDashboardRoute(this.pendingRoles);
+        this.router.navigate([route]);
+      },
+      error: (error) => {
+        this.error = error.error?.message || 'Não foi possível alterar a senha';
       }
     });
   }

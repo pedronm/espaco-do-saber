@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { BehaviorSubject, Observable, tap } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { AuthResponse, LoginRequest, RegisterRequest, RegisterResponse } from '../models/user.model';
+import { AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest, RegisterResponse } from '../models/user.model';
 import { environment } from '../../../environments/environment';
 
 @Injectable({
@@ -47,6 +47,22 @@ export class AuthService {
           ...tokenResponse
         };
         this.setCurrentUser(merged);
+      })
+    );
+  }
+
+  changePassword(request: ChangePasswordRequest): Observable<{ message: string }> {
+    return this.http.post<{ message: string }>(`${this.apiUrl}/change-password`, request).pipe(
+      tap(() => {
+        const current = this.currentUserValue;
+        if (!current) {
+          return;
+        }
+
+        this.setCurrentUser({
+          ...current,
+          passwordChangeRequired: false
+        });
       })
     );
   }

@@ -71,12 +71,19 @@ import { Subscription } from 'rxjs';
               <strong>{{ user.fullName }}</strong>
               <div>{{ user.username }} • {{ user.email }}</div>
               <small>Papel atual: {{ roleLabel(user.role) }}</small>
+              <span class="status-chip" *ngIf="user.passwordExpiresAt">Troca de senha pendente</span>
             </div>
             <div class="user-actions" *ngIf="user.role !== 'ADMIN'">
               <button class="btn-action" (click)="setRole(user, 'TEACHER')">Professor</button>
               <button class="btn-action" (click)="setRole(user, 'STUDENT')">Aluno</button>
+              <button class="btn-action" (click)="expirePassword(user)">Solicitar troca de senha</button>
             </div>
           </div>
+        </div>
+        <div class="pagination" *ngIf="totalUserPages > 1">
+          <button class="btn-action" (click)="previousUsersPage()" [disabled]="usersPage === 0">Anterior</button>
+          <span>Página {{ usersPage + 1 }} de {{ totalUserPages }} • {{ totalUsers }} usuários</span>
+          <button class="btn-action" (click)="nextUsersPage()" [disabled]="usersPage + 1 >= totalUserPages">Próxima</button>
         </div>
       </div>
 
@@ -194,12 +201,34 @@ import { Subscription } from 'rxjs';
       border-color: #c62828;
       color: #c62828;
     }
+    .pagination {
+      margin-top: 0.75rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+    }
+    .status-chip {
+      display: inline-block;
+      margin-left: 0.5rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 999px;
+      border: 1px solid #ed6c02;
+      color: #ed6c02;
+      font-size: 0.75rem;
+      font-weight: 600;
+      vertical-align: middle;
+    }
   `]
 })
 export class AdminDashboardComponent implements OnInit, OnDestroy {
   videos: Video[] = [];
   pendingUsers: ManagedUser[] = [];
   managedUsers: ManagedUser[] = [];
+  usersPage: number = 0;
+  usersPageSize: number = 10;
+  totalUserPages: number = 0;
+  totalUsers: number = 0;
   activeLiveStreams: string[] = [];
   obsServerUrl: string = '';
   obsStreamKey: string = '';
@@ -245,8 +274,15 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       this.pendingUsers = users;
     });
 
-    this.userManagementService.getAllUsers().subscribe(users => {
-      this.managedUsers = users;
+    this.loadManagedUsersPage(this.usersPage);
+  }
+
+  loadManagedUsersPage(page: number): void {
+    this.userManagementService.getAllUsers(page, this.usersPageSize).subscribe(result => {
+      this.managedUsers = result.content;
+      this.usersPage = result.number;
+      this.totalUserPages = result.totalPages;
+      this.totalUsers = result.totalElements;
     });
   }
 
@@ -303,9 +339,32 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     }
 
     this.userManagementService.updateUserRole(user.id, role).subscribe({
-      next: () => this.loadUsers(),
+      next: () => this.loadManagedUsersPage(this.usersPage),
       error: () => alert('Falha ao atualizar papel do usuário.')
     });
+  }
+
+  expirePassword(user: ManagedUser): void {
+    this.userManagementService.expireUserPassword(user.id).subscribe({
+      next: () => this.loadManagedUsersPage(this.usersPage),
+      error: () => alert('Falha ao solicitar troca de senha.')
+    });
+  }
+
+  previousUsersPage(): void {
+    if (this.usersPage <= 0) {
+      return;
+    }
+
+    this.loadManagedUsersPage(this.usersPage - 1);
+  }
+
+  nextUsersPage(): void {
+    if (this.usersPage + 1 >= this.totalUserPages) {
+      return;
+    }
+
+    this.loadManagedUsersPage(this.usersPage + 1);
   }
 
   roleLabel(role: ManagedUser['role']): string {

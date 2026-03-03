@@ -1,6 +1,7 @@
 import os
 import tempfile
 from datetime import timedelta
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
@@ -14,18 +15,39 @@ def _get_bool_env(name: str, default: str = "false") -> bool:
     return value in {"1", "true", "yes", "on"}
 
 
+def _first_env(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
 def _minio_client() -> Minio:
-    endpoint = os.getenv("MINIO_ENDPOINT", "video-storage")
-    port = os.getenv("MINIO_PORT", "9000")
-    access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-    secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+    raw_endpoint = _first_env("OB_STR_ENDPOINT", "MINIO_ENDPOINT", default="video-storage")
+    parsed = urlparse(raw_endpoint)
+
+    endpoint = raw_endpoint
     secure = _get_bool_env("MINIO_SECURE", "false")
-    return Minio(f"{endpoint}:{port}", access_key=access_key, secret_key=secret_key, secure=secure)
+
+    if parsed.scheme in {"http", "https"} and parsed.hostname:
+        endpoint = parsed.hostname
+        if parsed.port:
+            endpoint = f"{endpoint}:{parsed.port}"
+        secure = parsed.scheme == "https"
+    else:
+        port = os.getenv("MINIO_PORT", "9000")
+        endpoint = f"{endpoint}:{port}"
+
+    access_key = _first_env("OB_STR_API_KEY", "MINIO_ACCESS_KEY", default="minioadmin")
+    secret_key = _first_env("OB_STR_SECRET_KEY", "MINIO_SECRET_KEY", default="minioadmin")
+
+    return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
 
 
 app = FastAPI(title="Video Processing")
 minio_client = _minio_client()
-minio_bucket = os.getenv("MINIO_BUCKET", "videos")
+minio_bucket = _first_env("OB_STR_BUCKET", "MINIO_BUCKET", default="videos")
 
 
 @app.on_event("startup")

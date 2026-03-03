@@ -5,9 +5,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.client.HttpStatusCodeException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -126,5 +129,44 @@ public class KeycloakTokenProvider {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    public void changePassword(String accessToken, String currentPassword, String newPassword) {
+        String passwordUrl = String.format("%s/realms/%s/account/credentials/password",
+                keycloakServerUrl, keycloakRealm);
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setBearerAuth(accessToken);
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        String payload = String.format(
+                "{\"currentPassword\":\"%s\",\"newPassword\":\"%s\",\"confirmation\":\"%s\"}",
+                escapeJson(currentPassword),
+                escapeJson(newPassword),
+                escapeJson(newPassword)
+        );
+
+        HttpEntity<String> request = new HttpEntity<>(payload, headers);
+
+        try {
+            ResponseEntity<Void> response = restTemplate.exchange(passwordUrl, HttpMethod.PUT, request, Void.class);
+            if (!response.getStatusCode().is2xxSuccessful() && !response.getStatusCode().is3xxRedirection()) {
+                throw new RuntimeException("Keycloak retornou status inesperado ao trocar senha");
+            }
+        } catch (HttpStatusCodeException ex) {
+            throw new RuntimeException("Falha ao trocar senha no Keycloak: " + ex.getResponseBodyAsString());
+        } catch (Exception ex) {
+            throw new RuntimeException("Falha ao trocar senha no Keycloak: " + ex.getMessage());
+        }
+    }
+
+    private String escapeJson(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        return value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"");
     }
 }

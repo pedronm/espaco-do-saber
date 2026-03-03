@@ -16,7 +16,14 @@ interface FlvJsPlayer {
 
 interface FlvJsModule {
   isSupported(): boolean;
-  createPlayer(config: { type: 'flv'; url: string; isLive: boolean }): FlvJsPlayer;
+  createPlayer(config: {
+    type: 'flv';
+    url: string;
+    isLive: boolean;
+    headers?: Record<string, string>;
+    withCredentials?: boolean;
+    cors?: boolean;
+  }): FlvJsPlayer;
 }
 
 @Component({
@@ -85,7 +92,7 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   private statusSubscription?: Subscription;
   private flvPlayer?: FlvJsPlayer;
   private playbackTimeoutId?: ReturnType<typeof setTimeout>;
-  private readonly playbackTimeoutMs = 15000;
+  private readonly playbackTimeoutMs = 30000;
 
   constructor(
     private route: ActivatedRoute,
@@ -279,13 +286,18 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
       }
 
       const resolvedUrl = this.resolveVideoUrl(sourceUrl || this.streamGatewayService.getLiveFlvUrl(this.liveId));
+      const token = this.authService.getToken();
+      const headers = token ? { Authorization: `Bearer ${token}` } : undefined;
       this.attachPlaybackDiagnostics(videoElement, resolvedUrl, isLive ? 'flv-live' : 'flv-recording');
       this.startPlaybackTimeout(isLive ? 'flv-live' : 'flv-recording', resolvedUrl);
 
       this.flvPlayer = flvjs.createPlayer({
         type: 'flv',
         url: resolvedUrl,
-        isLive
+        isLive,
+        headers,
+        withCredentials: false,
+        cors: true
       });
       this.flvPlayer.attachMediaElement(videoElement);
       this.flvPlayer.load();
