@@ -1,19 +1,19 @@
-Here we'll have a python project for storing videos in a MinIO server.
+Here we'll have a python project for storing videos in Google Cloud Storage.
 
 ## Overview
 
-A Python project that manages video uploads and storage using MinIO, an S3-compatible object storage service.
+A Python project that manages video uploads and storage using Google Cloud Storage.
 
 ## Features
 
 - REST API for upload, list, and presigned download URLs
-- MinIO integration (S3 compatible)
+- Google Cloud Storage integration
 - Basic health endpoint
 
 ## Requirements
 
 - Python 3.11+
-- MinIO server
+- Google Cloud Storage bucket
 - Dependencies listed in `requirements.txt`
 
 ## Installation
@@ -24,15 +24,11 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Set up your MinIO connection details in `.env` or environment variables:
+Set up your GCS connection details in `.env` or environment variables:
 
 ```
-MINIO_ENDPOINT=video-storage
-MINIO_PORT=9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET=videos
-MINIO_SECURE=false
+GCS_BUCKET=videos
+GOOGLE_APPLICATION_CREDENTIALS=/var/secrets/google/key.json
 ```
 
 ## Usage

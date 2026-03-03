@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
+	"cloud.google.com/go/storage"
 	"github.com/nareix/joy4/av"
 	"github.com/nareix/joy4/format/flv"
 	"github.com/nareix/joy4/format/rtmp"
+	"google.golang.org/api/iterator"
 )
 
 type stream struct {
@@ -35,12 +35,8 @@ type streamHub struct {
 	mu      sync.RWMutex
 }
 
-type minioConfig struct {
-	Endpoint  string
-	AccessKey string
-	SecretKey string
-	Bucket    string
-	Secure    bool
+type storageConfig struct {
+	Bucket string
 }
 
 type serverConfig struct {
@@ -131,29 +127,9 @@ func (s *stream) close() {
 	s.mu.Unlock()
 }
 
-func loadMinioConfig() minioConfig {
-	rawEndpoint := envFirst("OB_STR_ENDPOINT", "MINIO_ENDPOINT", "video-storage")
-	endpoint := rawEndpoint
-	secure := strings.ToLower(os.Getenv("MINIO_SECURE")) == "true"
-
-	if parsed, err := url.Parse(rawEndpoint); err == nil && parsed.Hostname() != "" {
-		endpoint = parsed.Host
-		if parsed.Scheme == "https" {
-			secure = true
-		} else if parsed.Scheme == "http" {
-			secure = false
-		}
-	} else {
-		port := envOrDefault("MINIO_PORT", "9000")
-		endpoint = fmt.Sprintf("%s:%s", rawEndpoint, port)
-	}
-
-	return minioConfig{
-		Endpoint:  endpoint,
-		AccessKey: envFirst("OB_STR_API_KEY", "MINIO_ACCESS_KEY", "minioadmin"),
-		SecretKey: envFirst("OB_STR_SECRET_KEY", "MINIO_SECRET_KEY", "minioadmin"),
-		Bucket:    envFirst("OB_STR_BUCKET", "MINIO_BUCKET", "videos"),
-		Secure:    secure,
+func loadStorageConfig() storageConfig {
+	return storageConfig{
+		Bucket: envFirst("GCS_BUCKET", "OB_STR_BUCKET", envOrDefault("MINIO_BUCKET", "videos")),
 	}
 }
 
@@ -198,18 +174,12 @@ func envFirst(name1, name2, fallback string) string {
 	return envOrDefault(name2, fallback)
 }
 
-func ensureBucket(ctx context.Context, client *minio.Client, bucket string) error {
-	exists, err := client.BucketExists(ctx, bucket)
-	if err != nil {
-		return err
-	}
-	if exists {
-		return nil
-	}
-	return client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{})
+func ensureBucket(ctx context.Context, client *storage.Client, bucket string) error {
+	_, err := client.Bucket(bucket).Attrs(ctx)
+	return err
 }
 
-func ensureBucketWithRetry(client *minio.Client, bucket string, attempts int, delay time.Duration) error {
+func ensureBucketWithRetry(client *storage.Client, bucket string, attempts int, delay time.Duration) error {
 	var lastErr error
 	for i := 1; i <= attempts; i++ {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -221,29 +191,27 @@ func ensureBucketWithRetry(client *minio.Client, bucket string, attempts int, de
 		lastErr = err
 		time.Sleep(delay)
 	}
-	return fmt.Errorf("minio bucket setup failed after %d attempts: %w", attempts, lastErr)
+	return fmt.Errorf("gcs bucket check failed after %d attempts: %w", attempts, lastErr)
 }
 
 func main() {
-	cfg := loadMinioConfig()
+	cfg := loadStorageConfig()
 	serverCfg := loadServerConfig()
-	minioClient, err := minio.New(cfg.Endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""),
-		Secure: cfg.Secure,
-	})
+	gcsClient, err := storage.NewClient(context.Background())
 	if err != nil {
-		log.Fatalf("minio client init failed: %v", err)
+		log.Fatalf("gcs client init failed: %v", err)
 	}
+	defer gcsClient.Close()
 
-	if err := ensureBucketWithRetry(minioClient, cfg.Bucket, 30, 2*time.Second); err != nil {
-		log.Fatalf("minio bucket setup failed: %v", err)
+	if err := ensureBucketWithRetry(gcsClient, cfg.Bucket, 30, 2*time.Second); err != nil {
+		log.Fatalf("gcs bucket check failed: %v", err)
 	}
 
 	hub := newStreamHub()
 
 	httpServer := &http.Server{
 		Addr:    ":8083",
-		Handler: buildHTTPHandler(hub, minioClient, cfg.Bucket, serverCfg),
+		Handler: buildHTTPHandler(hub, gcsClient, cfg.Bucket, serverCfg),
 	}
 	go func() {
 		log.Printf("http server listening on %s", httpServer.Addr)
@@ -255,7 +223,7 @@ func main() {
 	rtmpServer := &rtmp.Server{
 		Addr: ":1935",
 		HandlePublish: func(conn *rtmp.Conn) {
-			handlePublish(conn, hub, minioClient, cfg.Bucket, serverCfg)
+			handlePublish(conn, hub, gcsClient, cfg.Bucket, serverCfg)
 		},
 		HandlePlay: func(conn *rtmp.Conn) {
 			handlePlay(conn, hub, serverCfg)
@@ -268,7 +236,7 @@ func main() {
 	}
 }
 
-func handlePublish(conn *rtmp.Conn, hub *streamHub, minioClient *minio.Client, bucket string, cfg serverConfig) {
+func handlePublish(conn *rtmp.Conn, hub *streamHub, gcsClient *storage.Client, bucket string, cfg serverConfig) {
 	log.Printf("publish attempt path=%s", conn.URL.Path)
 	startedAt := time.Now().UTC()
 	streamKey, err := resolveStreamKey(conn.URL.Path, cfg)
@@ -326,10 +294,8 @@ func handlePublish(conn *rtmp.Conn, hub *streamHub, minioClient *minio.Client, b
 	}
 
 	objectName := fmt.Sprintf("recordings/%s/%s.flv", streamKey, time.Now().UTC().Format("20060102-150405"))
-	if _, err := minioClient.FPutObject(context.Background(), bucket, objectName, tempFile.Name(), minio.PutObjectOptions{
-		ContentType: "video/x-flv",
-	}); err != nil {
-		log.Printf("minio upload error: %v", err)
+	if err := uploadObjectToGCS(context.Background(), gcsClient, bucket, objectName, tempFile.Name(), "video/x-flv"); err != nil {
+		log.Printf("gcs upload error: %v", err)
 	}
 
 	duration := int64(time.Since(startedAt).Seconds())
@@ -418,7 +384,7 @@ func handlePlay(conn *rtmp.Conn, hub *streamHub, cfg serverConfig) {
 	}
 }
 
-func buildHTTPHandler(hub *streamHub, minioClient *minio.Client, bucket string, cfg serverConfig) http.Handler {
+func buildHTTPHandler(hub *streamHub, gcsClient *storage.Client, bucket string, cfg serverConfig) http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -473,7 +439,7 @@ func buildHTTPHandler(hub *streamHub, minioClient *minio.Client, bucket string, 
 			return
 		}
 		if strings.HasSuffix(path, "/recording") {
-			handleStreamRecording(w, r, minioClient, bucket)
+			handleStreamRecording(w, r, gcsClient, bucket)
 			return
 		}
 		if strings.HasSuffix(path, "/live") {
@@ -502,7 +468,7 @@ func buildHTTPHandler(hub *streamHub, minioClient *minio.Client, bucket string, 
 			return
 		}
 		if strings.HasSuffix(path, "/recording") {
-			handleStreamRecording(w, r, minioClient, bucket)
+			handleStreamRecording(w, r, gcsClient, bucket)
 			return
 		}
 		if strings.HasSuffix(path, "/live") {
@@ -551,7 +517,7 @@ func handleStreamLive(w http.ResponseWriter, r *http.Request, hub *streamHub) {
 	})
 }
 
-func handleStreamRecording(w http.ResponseWriter, r *http.Request, minioClient *minio.Client, bucket string) {
+func handleStreamRecording(w http.ResponseWriter, r *http.Request, gcsClient *storage.Client, bucket string) {
 	path := strings.TrimSuffix(r.URL.Path, "/")
 	key := strings.TrimSuffix(strings.TrimPrefix(path, "/streams/"), "/recording")
 	if key == "" {
@@ -562,15 +528,21 @@ func handleStreamRecording(w http.ResponseWriter, r *http.Request, minioClient *
 	log.Printf("recording lookup started key=%s path=%s", key, path)
 
 	prefix := fmt.Sprintf("recordings/%s/", key)
-	objects := minioClient.ListObjects(context.Background(), bucket, minio.ListObjectsOptions{Prefix: prefix, Recursive: true})
-
+	ctx := context.Background()
+	objects := gcsClient.Bucket(bucket).Objects(ctx, &storage.Query{Prefix: prefix})
 	candidates := make([]string, 0)
-	for object := range objects {
-		if object.Err != nil {
-			continue
+	for {
+		object, err := objects.Next()
+		if errors.Is(err, iterator.Done) {
+			break
 		}
-		if strings.HasSuffix(object.Key, ".flv") {
-			candidates = append(candidates, object.Key)
+		if err != nil {
+			log.Printf("recording object list failed key=%s prefix=%s err=%v", key, prefix, err)
+			http.Error(w, "recording not found", http.StatusNotFound)
+			return
+		}
+		if strings.HasSuffix(object.Name, ".flv") {
+			candidates = append(candidates, object.Name)
 		}
 	}
 
@@ -582,7 +554,7 @@ func handleStreamRecording(w http.ResponseWriter, r *http.Request, minioClient *
 
 	sort.Strings(candidates)
 	latestObject := candidates[len(candidates)-1]
-	obj, err := minioClient.GetObject(context.Background(), bucket, latestObject, minio.GetObjectOptions{})
+	obj, err := gcsClient.Bucket(bucket).Object(latestObject).NewReader(ctx)
 	if err != nil {
 		log.Printf("recording object open failed key=%s object=%s err=%v", key, latestObject, err)
 		http.Error(w, "recording not found", http.StatusNotFound)
@@ -606,6 +578,24 @@ func handleStreamRecording(w http.ResponseWriter, r *http.Request, minioClient *
 	w.Header().Set("X-Recording-Filename", fileName)
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, obj)
+}
+
+func uploadObjectToGCS(ctx context.Context, client *storage.Client, bucket string, objectName string, filePath string, contentType string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := client.Bucket(bucket).Object(objectName).NewWriter(ctx)
+	writer.ContentType = contentType
+
+	if _, err := io.Copy(writer, file); err != nil {
+		_ = writer.Close()
+		return err
+	}
+
+	return writer.Close()
 }
 
 func handleStreamFlv(w http.ResponseWriter, r *http.Request, hub *streamHub) {

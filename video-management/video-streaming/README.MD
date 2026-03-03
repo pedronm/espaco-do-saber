@@ -1,17 +1,17 @@
 Here we'll have a Go project that streams videos to clients. It accepts RTMP input, relays it live,
-and stores completed streams in MinIO.
+and stores completed streams in Google Cloud Storage.
 
 ## Features
 - RTMP ingest and live relay
-- HTTP endpoints for stream listing and presigned MinIO URLs
-- MinIO integration (S3 compatible)
+- HTTP endpoints for stream listing and recording retrieval
+- Google Cloud Storage integration
 
 ## Getting Started
 
 ### Prerequisites
-- Go 1.24+
+- Go 1.25+
 - FFmpeg (for pushing RTMP)
-- MinIO server
+- Google Cloud Storage bucket
 
 ### Installation
 ```bash
@@ -25,12 +25,8 @@ go run main.go
 
 ### Environment
 ```
-MINIO_ENDPOINT=video-storage
-MINIO_PORT=9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET=videos
-MINIO_SECURE=false
+GCS_BUCKET=videos
+GOOGLE_APPLICATION_CREDENTIALS=/var/secrets/google/key.json
 RTMP_APP=live
 RTMP_PUBLIC_HOST=localhost
 # Optional: comma-separated allowed keys (when set, unknown keys are rejected)

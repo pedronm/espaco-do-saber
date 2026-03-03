@@ -81,29 +81,21 @@ services:
   video-processing:
     build: ./video-management/video-processing
     container_name: espacodosaber-video-processing
-    depends_on:
-      video-storage:
-        condition: service_healthy
     environment:
-      MINIO_ENDPOINT: video-storage
-      MINIO_PORT: 9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      GCS_BUCKET: ${GCS_BUCKET:-videos}
+      GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/key.json
     ports:
       - "8000:8000"
+    volumes:
+      - ./secrets/gcp:/var/secrets/google:ro
     networks:
       - app-network
   video-streaming:
     build: ./video-management/video-streaming
     container_name: espacodosaber-video-streaming
-    depends_on:
-      video-storage:
-        condition: service_healthy
     environment:
-      MINIO_ENDPOINT: video-storage
-      MINIO_PORT: 9000
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
+      GCS_BUCKET: ${GCS_BUCKET:-videos}
+      GOOGLE_APPLICATION_CREDENTIALS: /var/secrets/google/key.json
       RTMP_APP: live
       RTMP_PUBLIC_HOST: localhost
       BACKEND_BASE_URL: http://backend:8080
@@ -112,6 +104,8 @@ services:
       - "1935:1935"
       - "8083:8083"
       - "5005:5005/udp"
+    volumes:
+      - ./secrets/gcp:/var/secrets/google:ro
     networks:
       - app-network
   frontend:
@@ -124,22 +118,6 @@ services:
     networks:
       - app-network
 
-  video-storage:
-    image: minio/minio:latest
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
-      interval: 5s
-      timeout: 3s
-      retries: 20
 volumes:
   postgres_data:
 
