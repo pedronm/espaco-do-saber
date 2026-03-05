@@ -14,14 +14,13 @@ export class VideoService {
   constructor(private http: HttpClient) {}
 
   uploadVideo(file: File, title: string, description: string, isPublic: boolean, isLive: boolean = false): Observable<Video> {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('title', title);
-    formData.append('description', description);
-    formData.append('isPublic', isPublic.toString());
-    formData.append('isLive', isLive.toString());
-
-    return this.http.post<Video>(`${this.apiUrl}/upload`, formData);
+    return this.http.post<Video>(`${this.apiUrl}`, {
+      title,
+      description,
+      isPublic,
+      isLive,
+      streamingUrl: ''
+    });
   }
 
   getPublicVideos(): Observable<Video[]> {
@@ -46,7 +45,17 @@ export class VideoService {
   }
 
   getLiveStreamStatus(liveId: string): Observable<{ status: 'ACTIVE' | 'COMPLETED' | 'NOT_FOUND', videoId?: number, title?: string }> {
-    return this.http.get<{ status: 'ACTIVE' | 'COMPLETED' | 'NOT_FOUND', videoId?: number, title?: string }>(`${this.apiUrl}/stream/live/${liveId}/status`);
+    return this.http.get<{ streams: { id: string }[] }>(`${environment.streamingApiUrl}/live-streams/active`).pipe(
+      map((response) => {
+        const stream = (response.streams || []).find((item) => item.id === liveId);
+        if (stream) {
+          return { status: 'ACTIVE' as const };
+        }
+
+        return { status: 'COMPLETED' as const };
+      }),
+      catchError(() => of({ status: 'NOT_FOUND' as const }))
+    );
   }
 
   getVideo(id: number): Observable<Video> {

@@ -14,6 +14,8 @@ import { VideoPlayerComponent } from './shared/components/video-player.component
 import { VideoGridComponent } from './shared/components/video-grid.component';
 import { JwtInterceptor } from './shared/services/jwt.interceptor';
 import { CommonModule } from '@angular/common';
+import { AuthModule } from '@auth0/auth0-angular';
+import { environment } from '../environments/environment';
 
 @NgModule({
   declarations: [
@@ -31,7 +33,18 @@ import { CommonModule } from '@angular/common';
     AppRoutingModule,
     FormsModule,
     HttpClientModule,
-    CommonModule
+    CommonModule,
+    AuthModule.forRoot({
+      domain: environment.auth0.domain,
+      clientId: environment.auth0.clientId,
+      authorizationParams: {
+        redirect_uri: window.location.origin,
+        audience: environment.auth0.audience,
+        scope: 'openid profile email'
+      },
+      cacheLocation: 'localstorage',
+      useRefreshTokens: true
+    })
   ],
   providers: [
     {

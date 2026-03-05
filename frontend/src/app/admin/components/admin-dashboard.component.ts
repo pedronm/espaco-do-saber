@@ -3,7 +3,6 @@ import { Router } from '@angular/router';
 import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 import { StreamGatewayService } from '../../shared/services/stream-gateway.service';
-import { AuthService } from '../../shared/services/auth.service';
 import { ManagedUser, UserManagementService } from '../../shared/services/user-management.service';
 import { Subscription } from 'rxjs';
 
@@ -239,7 +238,6 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     private videoService: VideoService,
     private userManagementService: UserManagementService,
     private streamGatewayService: StreamGatewayService,
-    private authService: AuthService,
     private router: Router
   ) {}
 
@@ -255,8 +253,8 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
         this.loadAllVideos();
       }
     });
-    this.obsStreamKey = this.authService.getOrCreateObsStreamKey() || 'admin-sala';
     this.obsServerUrl = this.streamGatewayService.getObsServerUrl();
+    this.regenerateStreamKey();
   }
 
   ngOnDestroy(): void {
@@ -291,9 +289,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   }
 
   regenerateStreamKey(): void {
-    this.authService.regenerateObsStreamKey().subscribe({
-      next: (key) => {
-        this.obsStreamKey = key;
+    this.streamGatewayService.createLiveStream().subscribe({
+      next: (stream) => {
+        this.obsStreamKey = stream.streamKey;
+        this.obsServerUrl = stream.rtmpUrl;
       },
       error: () => {
         alert('Não foi possível gerar nova chave no momento.');

@@ -3,7 +3,6 @@ import { Router } from '@angular/router';
 import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 import { StreamGatewayService } from '../../shared/services/stream-gateway.service';
-import { AuthService } from '../../shared/services/auth.service';
 import { Subscription } from 'rxjs';
 
 @Component({
@@ -202,7 +201,6 @@ export class TeacherDashboardComponent implements OnInit, OnDestroy {
   constructor(
     private videoService: VideoService,
     private streamGatewayService: StreamGatewayService,
-    private authService: AuthService,
     private router: Router
   ) {}
 
@@ -217,8 +215,8 @@ export class TeacherDashboardComponent implements OnInit, OnDestroy {
         this.loadVideos();
       }
     });
-    this.obsStreamKey = this.authService.getOrCreateObsStreamKey() || 'professor-sala';
     this.obsServerUrl = this.streamGatewayService.getObsServerUrl();
+    this.regenerateStreamKey();
   }
 
   ngOnDestroy(): void {
@@ -229,9 +227,10 @@ export class TeacherDashboardComponent implements OnInit, OnDestroy {
   }
 
   regenerateStreamKey(): void {
-    this.authService.regenerateObsStreamKey().subscribe({
-      next: (key) => {
-        this.obsStreamKey = key;
+    this.streamGatewayService.createLiveStream().subscribe({
+      next: (stream) => {
+        this.obsStreamKey = stream.streamKey;
+        this.obsServerUrl = stream.rtmpUrl;
       },
       error: () => {
         alert('Não foi possível gerar nova chave no momento.');

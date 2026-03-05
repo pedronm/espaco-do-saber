@@ -1,7 +1,7 @@
 import { Component } from '@angular/core';
-import { Router } from '@angular/router';
 import { AuthService } from '../../shared/services/auth.service';
 import { RegisterRequest } from '../../shared/models/user.model';
+import { Router } from '@angular/router';
 
 @Component({
   standalone: false,
@@ -10,38 +10,83 @@ import { RegisterRequest } from '../../shared/models/user.model';
     <div class="register-container">
       <div class="register-card">
         <h2>Cadastro - Espaço do Saber</h2>
+
         <form (ngSubmit)="onSubmit()">
           <div class="form-group">
-            <label>Nome completo</label>
-            <input type="text" [(ngModel)]="registerData.fullName" name="fullName" required>
+            <label for="fullName">Nome completo</label>
+            <input
+              id="fullName"
+              type="text"
+              name="fullName"
+              [(ngModel)]="registerData.fullName"
+              required
+            >
           </div>
+
           <div class="form-group">
-            <label>Usuário</label>
-            <input type="text" [(ngModel)]="registerData.username" name="username" required>
+            <label for="username">Usuário</label>
+            <input
+              id="username"
+              type="text"
+              name="username"
+              [(ngModel)]="registerData.username"
+              required
+            >
           </div>
+
           <div class="form-group">
-            <label>Email</label>
-            <input type="email" [(ngModel)]="registerData.email" name="email" required>
+            <label for="email">E-mail</label>
+            <input
+              id="email"
+              type="email"
+              name="email"
+              [(ngModel)]="registerData.email"
+              required
+            >
           </div>
+
           <div class="form-group">
-            <label>Senha</label>
-            <input type="password" [(ngModel)]="registerData.password" name="password" required>
+            <label for="password">Senha</label>
+            <input
+              id="password"
+              type="password"
+              name="password"
+              [(ngModel)]="registerData.password"
+              required
+            >
           </div>
+
           <div class="form-group">
-            <label>Confirmar senha</label>
-            <input type="password" [(ngModel)]="registerData.confirmPassword" name="confirmPassword" required>
+            <label for="confirmPassword">Confirmar senha</label>
+            <input
+              id="confirmPassword"
+              type="password"
+              name="confirmPassword"
+              [(ngModel)]="registerData.confirmPassword"
+              required
+            >
           </div>
+
           <div class="form-group">
-            <label>Tipo de cadastro</label>
-            <select [(ngModel)]="registerData.accessType" name="accessType" required>
-              <option value="PUBLICO">Público</option>
+            <label for="accessType">Tipo de acesso</label>
+            <select
+              id="accessType"
+              name="accessType"
+              [(ngModel)]="registerData.accessType"
+            >
               <option value="ALUNO">Aluno</option>
+              <option value="PUBLICO">Público</option>
             </select>
           </div>
-          <button type="submit" class="btn-primary">Enviar cadastro</button>
-          <div class="success" *ngIf="successMessage">{{ successMessage }}</div>
-          <div class="error" *ngIf="error">{{ error }}</div>
+
+          <button type="submit" class="btn-primary" [disabled]="loading">
+            {{ loading ? 'Cadastrando...' : 'Cadastrar' }}
+          </button>
         </form>
+
+        <p class="error" *ngIf="error">{{ error }}</p>
+        <p class="success" *ngIf="success">{{ success }}</p>
+
         <p class="login-link">
           Já tem conta? <a [routerLink]="['/login']">Entrar</a>
         </p>
@@ -127,40 +172,39 @@ export class RegisterComponent {
     password: '',
     confirmPassword: '',
     fullName: '',
-    accessType: 'PUBLICO'
+    accessType: 'ALUNO'
   };
-  error: string = '';
-  successMessage: string = '';
 
-  constructor(
-    private authService: AuthService,
-    private router: Router
-  ) {}
+  loading = false;
+  error = '';
+  success = '';
+
+  constructor(private authService: AuthService, private router: Router) {}
 
   onSubmit(): void {
     this.error = '';
-    this.successMessage = '';
+    this.success = '';
 
-    if (this.registerData.password !== this.registerData.confirmPassword) {
-      this.error = 'A confirmação de senha não confere';
+    if (!this.registerData.username || !this.registerData.email || !this.registerData.password || !this.registerData.confirmPassword || !this.registerData.fullName) {
+      this.error = 'Preencha todos os campos obrigatórios.';
       return;
     }
 
+    if (this.registerData.password !== this.registerData.confirmPassword) {
+      this.error = 'As senhas não conferem.';
+      return;
+    }
+
+    this.loading = true;
     this.authService.register(this.registerData).subscribe({
       next: (response) => {
-        this.successMessage = response.message || 'Cadastro enviado com sucesso. Aguarde aprovação do administrador.';
-        this.registerData = {
-          username: '',
-          email: '',
-          password: '',
-          confirmPassword: '',
-          fullName: '',
-          accessType: 'PUBLICO'
-        };
-        setTimeout(() => this.router.navigate(['/login']), 2000);
+        this.success = response.message || 'Cadastro realizado com sucesso.';
+        this.loading = false;
+        setTimeout(() => this.router.navigate(['/login']), 1000);
       },
       error: (error) => {
-        this.error = error.error.message || 'Falha no cadastro';
+        this.error = error?.error?.message || 'Não foi possível concluir o cadastro.';
+        this.loading = false;
       }
     });
   }

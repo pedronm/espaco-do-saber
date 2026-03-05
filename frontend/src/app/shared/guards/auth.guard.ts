@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
 import { Router, CanActivate, ActivatedRouteSnapshot, RouterStateSnapshot } from '@angular/router';
 import { AuthService } from '../services/auth.service';
+import { Observable } from 'rxjs';
+import { map } from 'rxjs/operators';
 
 @Injectable({ providedIn: 'root' })
 export class AuthGuard implements CanActivate {
@@ -9,28 +11,32 @@ export class AuthGuard implements CanActivate {
     private authService: AuthService
   ) {}
 
-  canActivate(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean {
-    const currentUser = this.authService.currentUserValue;
-    if (currentUser) {
-      const requiredRole = route.data['role'];
-      const requiredRoles = route.data['roles'] as string[] | undefined;
+  canActivate(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): Observable<boolean> {
+    return this.authService.currentUser.pipe(
+      map((currentUser) => {
+        if (!currentUser) {
+          this.authService.loginWithRedirect();
+          return false;
+        }
 
-      if (requiredRole && currentUser.roles?.indexOf(requiredRole) === -1) {
-        this.router.navigate(['/']);
-        return false;
-      }
+        const requiredRole = route.data['role'];
+        const requiredRoles = route.data['roles'] as string[] | undefined;
 
-      if (requiredRoles && requiredRoles.length > 0) {
-        const hasAnyRole = requiredRoles.some(role => currentUser.roles?.includes(role));
-        if (!hasAnyRole) {
+        if (requiredRole && currentUser.roles?.indexOf(requiredRole) === -1) {
           this.router.navigate(['/']);
           return false;
         }
-      }
-      return true;
-    }
 
-    this.router.navigate(['/login'], { queryParams: { returnUrl: state.url } });
-    return false;
+        if (requiredRoles && requiredRoles.length > 0) {
+          const hasAnyRole = requiredRoles.some(role => currentUser.roles?.includes(role));
+          if (!hasAnyRole) {
+            this.router.navigate(['/']);
+            return false;
+          }
+        }
+
+        return true;
+      })
+    );
   }
 }

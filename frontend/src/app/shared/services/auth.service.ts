@@ -1,24 +1,38 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, tap } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { AuthService as Auth0Service, User } from '@auth0/auth0-angular';
+import { BehaviorSubject, Observable, from, of } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
+import { map, switchMap, tap } from 'rxjs/operators';
 import { AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest, RegisterResponse } from '../models/user.model';
 import { environment } from '../../../environments/environment';
+import { HttpClient } from '@angular/common/http';
 
 @Injectable({
   providedIn: 'root'
 })
 export class AuthService {
-  private apiUrl = `${environment.apiUrl}/auth`;
   private currentUserSubject: BehaviorSubject<AuthResponse | null>;
   public currentUser: Observable<AuthResponse | null>;
 
-  constructor(private http: HttpClient) {
-    const storedUser = localStorage.getItem('currentUser');
-    this.currentUserSubject = new BehaviorSubject<AuthResponse | null>(
-      storedUser ? JSON.parse(storedUser) : null
-    );
+  constructor(private auth0: Auth0Service, private http: HttpClient) {
+    this.currentUserSubject = new BehaviorSubject<AuthResponse | null>(null);
     this.currentUser = this.currentUserSubject.asObservable();
+
+    this.auth0.isAuthenticated$
+      .pipe(
+        switchMap((authenticated) => {
+          if (!authenticated) {
+            return of(null);
+          }
+
+          return this.auth0.user$.pipe(
+            switchMap((user) => this.auth0.idTokenClaims$.pipe(map((claims) => this.buildUserSession(user, claims || undefined))))
+          );
+        })
+      )
+      .subscribe((session) => {
+        this.currentUserSubject.next(session);
+      });
   }
 
   public get currentUserValue(): AuthResponse | null {
@@ -26,55 +40,34 @@ export class AuthService {
   }
 
   login(credentials: LoginRequest): Observable<AuthResponse> {
-    return this.http.post<AuthResponse>(`${this.apiUrl}/login`, credentials)
-      .pipe(
-        tap(user => this.setCurrentUser(user))
-      );
+    return from(this.auth0.loginWithRedirect()).pipe(
+      switchMap(() => this.currentUser)
+    ) as Observable<AuthResponse>;
   }
 
   register(request: RegisterRequest): Observable<RegisterResponse> {
-    return this.http.post<RegisterResponse>(`${this.apiUrl}/register`, request);
+    return this.http.post<RegisterResponse>(`${environment.apiUrl}/auth/register`, request);
   }
 
   refreshToken(): Observable<AuthResponse> {
-    const refreshToken = this.currentUserValue?.refresh_token;
-    return this.http.post<AuthResponse>(`${this.apiUrl}/refresh`, {
-      refresh_token: refreshToken
-    }).pipe(
-      tap(tokenResponse => {
-        const merged: AuthResponse = {
-          ...(this.currentUserValue || {}),
-          ...tokenResponse
-        };
-        this.setCurrentUser(merged);
-      })
+    return from(this.auth0.getAccessTokenSilently()).pipe(
+      map((token) => ({
+        ...(this.currentUserValue || {}),
+        access_token: token
+      }))
     );
   }
 
   changePassword(request: ChangePasswordRequest): Observable<{ message: string }> {
-    return this.http.post<{ message: string }>(`${this.apiUrl}/change-password`, request).pipe(
-      tap(() => {
-        const current = this.currentUserValue;
-        if (!current) {
-          return;
-        }
-
-        this.setCurrentUser({
-          ...current,
-          passwordChangeRequired: false
-        });
-      })
-    );
+    return of({ message: 'Fluxo de troca de senha é gerenciado pelo Auth0.' });
   }
 
   logout(): void {
-    localStorage.removeItem('currentUser');
-    this.currentUserSubject.next(null);
+    this.auth0.logout({ logoutParams: { returnTo: window.location.origin } });
   }
 
   getToken(): string | null {
-    const user = this.currentUserValue;
-    return user ? (user as any).access_token || user.token : null;
+    return this.currentUserValue?.access_token || null;
   }
 
   isAuthenticated(): boolean {
@@ -112,24 +105,46 @@ export class AuthService {
   }
 
   regenerateObsStreamKey(): Observable<string> {
-    return this.http.post<{ obs_stream_key: string }>(`${environment.apiUrl}/teacher/stream-key/regenerate`, {}).pipe(
-      tap(response => {
+    return of(this.getOrCreateObsStreamKey() || 'stream-key').pipe(
+      tap((obsStreamKey) => {
         const current = this.currentUserValue;
-        if (!current || !response?.obs_stream_key) {
+        if (!current) {
           return;
         }
 
         this.setCurrentUser({
           ...current,
-          obs_stream_key: response.obs_stream_key
+          obs_stream_key: obsStreamKey
         });
-      }),
-      map(response => response.obs_stream_key)
+      })
     );
   }
 
+  loginWithRedirect(signUp = false): void {
+    this.auth0.loginWithRedirect({
+      authorizationParams: signUp ? { screen_hint: 'signup' } : undefined
+    });
+  }
+
+  async getAccessTokenSilently(): Promise<string> {
+    return firstValueFrom(this.auth0.getAccessTokenSilently());
+  }
+
+  private buildUserSession(user: User | null | undefined, claims?: Record<string, unknown>): AuthResponse {
+    const rolesClaimKey = environment.auth0.rolesClaim;
+    const roles = Array.isArray(claims?.[rolesClaimKey])
+      ? (claims?.[rolesClaimKey] as string[])
+      : [];
+
+    return {
+      access_token: undefined,
+      username: user?.nickname || user?.name || user?.email,
+      email: user?.email,
+      roles
+    };
+  }
+
   private setCurrentUser(user: AuthResponse): void {
-    localStorage.setItem('currentUser', JSON.stringify(user));
     this.currentUserSubject.next(user);
   }
 }

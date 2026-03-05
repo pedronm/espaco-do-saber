@@ -14,9 +14,16 @@ export class StreamGatewayService {
 
   constructor(private http: HttpClient) {}
 
+  createLiveStream(): Observable<{ id: string; streamKey: string; playbackId?: string; rtmpUrl: string; ingestUrl: string }> {
+    return this.http.post<{ id: string; streamKey: string; playbackId?: string; rtmpUrl: string; ingestUrl: string }>(
+      `${this.streamingApiUrl}/live-streams`,
+      {}
+    );
+  }
+
   getActiveStreams(): Observable<string[]> {
-    return this.http.get<{ streams?: string[] }>(`${this.streamingApiUrl}/streams`).pipe(
-      map(response => response?.streams ?? [])
+    return this.http.get<{ streams?: { id: string }[] }>(`${this.streamingApiUrl}/live-streams/active`).pipe(
+      map(response => (response?.streams ?? []).map(stream => stream.id))
     );
   }
 
@@ -27,19 +34,19 @@ export class StreamGatewayService {
   }
 
   getLiveFlvUrl(liveId: string): string {
-    return `${this.streamingApiUrl}/streams/${this.encodePathSegment(liveId)}/flv`;
+    return `https://stream.mux.com/${this.encodePathSegment(liveId)}.m3u8`;
   }
 
   getRecordingUrl(liveId: string): string {
-    return `${this.streamingApiUrl}/streams/${this.encodePathSegment(liveId)}/recording`;
+    return `https://stream.mux.com/${this.encodePathSegment(liveId)}.m3u8`;
   }
 
   getObsServerUrl(): string {
-    return `${this.getResolvedObsBaseUrl()}/live`;
+    return this.getResolvedObsBaseUrl();
   }
 
   getObsIngestEndpoint(streamKey: string): string {
-    return `${this.getResolvedObsBaseUrl()}/live/${streamKey}`;
+    return `${this.getResolvedObsBaseUrl()}/${streamKey}`;
   }
 
   private getResolvedObsBaseUrl(): string {

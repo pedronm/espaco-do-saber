@@ -1,7 +1,5 @@
 import { Component } from '@angular/core';
-import { Router } from '@angular/router';
 import { AuthService } from '../../shared/services/auth.service';
-import { ChangePasswordRequest, LoginRequest } from '../../shared/models/user.model';
 
 @Component({
   standalone: false,
@@ -9,42 +7,10 @@ import { ChangePasswordRequest, LoginRequest } from '../../shared/models/user.mo
   template: `
     <div class="login-container">
       <div class="login-card">
-        <h2>Login - Espaço do Saber</h2>
-        <form (ngSubmit)="onSubmit()">
-          <div class="form-group">
-            <label>Login</label>
-            <input type="text" [(ngModel)]="credentials.username" name="username" required>
-          </div>
-          <div class="form-group">
-            <label>Senha</label>
-            <input type="password" [(ngModel)]="credentials.password" name="password" required>
-          </div>
-          <button type="submit" class="btn-primary">Login</button>
-          <div class="error" *ngIf="error">{{ error }}</div>
-        </form>
-
-        <div class="password-change-box" *ngIf="requiresPasswordChange">
-          <h3>Troca de senha obrigatória</h3>
-          <p>Seu acesso requer atualização de senha antes de continuar.</p>
-          <form (ngSubmit)="onChangePassword()">
-            <div class="form-group">
-              <label>Senha atual</label>
-              <input type="password" [(ngModel)]="passwordChange.currentPassword" name="currentPassword" required>
-            </div>
-            <div class="form-group">
-              <label>Nova senha</label>
-              <input type="password" [(ngModel)]="passwordChange.newPassword" name="newPassword" required>
-            </div>
-            <div class="form-group">
-              <label>Confirmar nova senha</label>
-              <input type="password" [(ngModel)]="passwordChange.confirmNewPassword" name="confirmNewPassword" required>
-            </div>
-            <button type="submit" class="btn-primary">Alterar senha</button>
-          </form>
-        </div>
-        <p class="register-link">
-          Cadastre-se <a [routerLink]="['/register']">aqui</a>
-        </p>
+        <h2>Entrar - Espaço do Saber</h2>
+        <p class="register-link">Autenticação centralizada via Auth0.</p>
+        <button type="button" class="btn-primary" (click)="onSubmit()">Entrar</button>
+        <button type="button" class="btn-secondary" (click)="loginWithSignupHint()">Criar conta</button>
       </div>
     </div>
   `,
@@ -128,90 +94,27 @@ import { ChangePasswordRequest, LoginRequest } from '../../shared/models/user.mo
       color: #1976d2;
       text-decoration: none;
     }
+    .btn-secondary {
+      margin-top: 0.75rem;
+      width: 100%;
+      padding: 0.75rem;
+      background: white;
+      color: #1976d2;
+      border: 1px solid #1976d2;
+      border-radius: 4px;
+      font-size: 1rem;
+      cursor: pointer;
+    }
   `]
 })
 export class LoginComponent {
-  credentials: LoginRequest = {
-    username: '',
-    password: ''
-  };
-  error: string = '';
-  requiresPasswordChange: boolean = false;
-  pendingRoles: string[] = [];
-  passwordChange: ChangePasswordRequest = {
-    currentPassword: '',
-    newPassword: '',
-    confirmNewPassword: ''
-  };
-
-  constructor(
-    private authService: AuthService,
-    private router: Router
-  ) {}
+  constructor(private authService: AuthService) {}
 
   onSubmit(): void {
-    this.error = '';
-    this.authService.login(this.credentials).subscribe({
-      next: (response) => {
-        this.pendingRoles = response.roles ?? [];
-        this.requiresPasswordChange = !!response.passwordChangeRequired;
-
-        if (this.requiresPasswordChange) {
-          return;
-        }
-
-        const route = this.getDashboardRoute(this.pendingRoles);
-        this.router.navigate([route]);
-      },
-      error: (error) => {
-        this.error = 'Invalid username or password';
-      }
-    });
+    this.authService.loginWithRedirect(false);
   }
 
-  onChangePassword(): void {
-    this.error = '';
-
-    if (this.passwordChange.newPassword !== this.passwordChange.confirmNewPassword) {
-      this.error = 'A confirmação da nova senha não confere';
-      return;
-    }
-
-    this.authService.changePassword(this.passwordChange).subscribe({
-      next: () => {
-        this.requiresPasswordChange = false;
-        this.passwordChange = {
-          currentPassword: '',
-          newPassword: '',
-          confirmNewPassword: ''
-        };
-
-        const route = this.getDashboardRoute(this.pendingRoles);
-        this.router.navigate([route]);
-      },
-      error: (error) => {
-        this.error = error.error?.message || 'Não foi possível alterar a senha';
-      }
-    });
-  }
-
-  getDashboardRoute(roles: string[]): string {
-    let route = '/'
-    roles.forEach( role => {
-      switch (role) {
-        case 'ADMIN':
-          route ='/admin';
-          break;
-        case 'TEACHER':
-          route ='/teacher';
-          break;
-        case 'STUDENT':
-          route = '/student';
-          break;
-        default:
-          break;
-      }
-    })    
-    return route
+  loginWithSignupHint(): void {
+    this.authService.loginWithRedirect(true);
   }
 }

@@ -1,0 +1,20 @@
+{
+  "name": "espaco-do-saber-worker-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
+    "hono": "^4.6.10",
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260220.0",
+    "typescript": "^5.7.3",
+    "wrangler": "^4.5.0"
+  }
+}

@@ -1,21 +1,13 @@
-# Backend - Maven
-backend/target/
-backend/.mvn/
-backend/mvnw
-backend/mvnw.cmd
-
-# Backend - Gradle
-backend/build/
-backend/.gradle/
-backend/bin/
-
 # Frontend
 frontend/node_modules/
 frontend/dist/
 frontend/.angular/
 
-# Uploads
-uploads/
+# Workers
+workers/**/node_modules/
+workers/**/.wrangler/
+workers/**/.dev.vars
+workers/**/.pythonlibs/
 
 # IDE
 .idea/

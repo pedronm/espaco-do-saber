@@ -1,13 +1,17 @@
 export const environment = {
   production: true,
   apiUrl: '/api',
-  streamingApiUrl: '/streaming',
-  obsIngestBaseUrl: 'rtmp://video-streaming:1935',
-  wsUrl: '/ws',
+  streamingApiUrl: '/api/mux',
+  obsIngestBaseUrl: 'rtmp://global-live.mux.com:5222/app',
+  wsUrl: '',
   appLogo: 'assets/logo-espaco-saber.png',
-  livePlaybackStrategy: 'webrtc',
-  webrtcSignalingPath: '/api/videos/stream/live/webrtc',
-  webrtcIceServers: [
-    { urls: 'stun:stun.l.google.com:19302' }
-  ]
+  livePlaybackStrategy: 'hls',
+  webrtcSignalingPath: '',
+  webrtcIceServers: [],
+  auth0: {
+    domain: 'YOUR_AUTH0_DOMAIN',
+    clientId: 'YOUR_AUTH0_CLIENT_ID',
+    audience: 'https://api.espacodosaber.com',
+    rolesClaim: 'https://espacodosaber.com/roles'
+  }
 };

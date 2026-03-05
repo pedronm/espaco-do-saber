@@ -17,6 +17,11 @@ export class ChatService {
 
   connect(token: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (!environment.wsUrl) {
+        reject(new Error('Chat websocket is not configured for this deployment.'));
+        return;
+      }
+
       const socket = new SockJS(environment.wsUrl);
       this.stompClient = new Client({
         webSocketFactory: () => socket as any,
