@@ -3,11 +3,26 @@ frontend/node_modules/
 frontend/dist/
 frontend/.angular/
 
+# Configuration files with sensitive data
+*.prod.*
+*.production.*
+wrangler.*
+
+
+
 # Workers
 workers/**/node_modules/
 workers/**/.wrangler/
 workers/**/.dev.vars
 workers/**/.pythonlibs/
+
+# Environment
+.env
+*.env
+
+# Logs
+logs/
+*.log
 
 # IDE
 .idea/
