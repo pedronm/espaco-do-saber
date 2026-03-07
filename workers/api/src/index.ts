@@ -8,6 +8,7 @@ type Role = 'ADMIN' | 'TEACHER' | 'STUDENT';
 type AppBindings = {
   VIDEOS_BUCKET: R2Bucket;
   APP_ENV: string;
+  FRONTEND_ORIGIN?: string;
   AUTH0_DOMAIN: string;
   AUTH0_AUDIENCE: string;
   AUTH0_ISSUER?: string;
@@ -29,7 +30,10 @@ type AppVariables = {
 
 const app = new Hono<{ Bindings: AppBindings; Variables: AppVariables }>();
 
-app.use('/*', cors({ origin: '*', allowHeaders: ['Authorization', 'Content-Type'], allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] }));
+app.use('/*', async (c, next) => {
+  const origin = c.env.FRONTEND_ORIGIN || '*';
+  return cors({ origin, allowHeaders: ['Authorization', 'Content-Type'], allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] })(c, next);
+});
 
 app.get('/health', (c) => c.json({ ok: true, service: 'workers-api', env: c.env.APP_ENV || 'unknown' }));
 

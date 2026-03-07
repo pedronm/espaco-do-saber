@@ -11,7 +11,7 @@ export const environment = {
   auth0: {
     domain: 'YOUR_AUTH0_DOMAIN',
     clientId: 'YOUR_AUTH0_CLIENT_ID',
-    audience: 'https://api.espacodosaber.com',
+    audience: 'https://api.espacodosaber.cpmacursos.com',
     rolesClaim: 'https://espacodosaber.com/roles'
   }
 };

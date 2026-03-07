@@ -1,6 +1,8 @@
 import json
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
+from workers import Response, WorkerEntrypoint
 
 def _json(data, status=200):
     return Response.new(
@@ -14,9 +16,13 @@ def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _job_id() -> str:
+    return f"job-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+
+
 async def on_fetch(request, env):
-    url = URL.new(request.url)
-    path = url.pathname
+    parsed_url = urlparse(request.url)
+    path = parsed_url.path
     method = request.method.upper()
 
     if path == "/health" and method == "GET":
@@ -30,7 +36,7 @@ async def on_fetch(request, env):
         if not source_url or not target_key:
             return _json({"message": "sourceUrl and targetKey are required"}, 400)
 
-        job_id = f"job-{Date.now()}"
+        job_id = _job_id()
 
         metadata = {
             "id": job_id,
@@ -57,3 +63,8 @@ async def on_fetch(request, env):
         return _json(json.loads(content))
 
     return _json({"message": "Not found"}, 404)
+
+
+class Default(WorkerEntrypoint):
+    async def fetch(self, request):
+        return await on_fetch(request, self.env)
