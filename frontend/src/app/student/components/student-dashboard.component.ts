@@ -4,6 +4,7 @@ import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 import { StreamGatewayService } from '../../shared/services/stream-gateway.service';
 import { Subscription } from 'rxjs';
+import { AuthService } from '../../shared/services/auth.service';
 
 @Component({
   standalone: false,
@@ -140,13 +141,25 @@ export class StudentDashboardComponent implements OnInit, OnDestroy {
   constructor(
     private videoService: VideoService,
     private streamGatewayService: StreamGatewayService,
+    private authService: AuthService,
     private router: Router
   ) {}
 
   ngOnInit(): void {
+    if (!this.authService.isAuthenticated()) {
+      this.router.navigate(['/login']);
+      return;
+    }
+
     this.loadVideos();
-    this.liveSubscription = this.streamGatewayService.watchActiveStreams().subscribe(streams => {
-      this.activeLiveStreams = streams;
+    this.liveSubscription = this.streamGatewayService.watchActiveStreams().subscribe({
+      next: (streams) => {
+        this.activeLiveStreams = streams;
+      },
+      error: (error) => {
+        console.warn('[StudentDashboard] Live stream polling failed', error);
+        this.activeLiveStreams = [];
+      }
     });
   }
 

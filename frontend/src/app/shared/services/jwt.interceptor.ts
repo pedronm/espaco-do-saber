@@ -23,15 +23,37 @@ export class JwtInterceptor implements HttpInterceptor {
 
     return from(this.authService.getAccessTokenSilently()).pipe(
       switchMap((token) => {
+        const resolvedToken = token || this.authService.getToken() || '';
+        if (!resolvedToken) {
+          console.warn('[JwtInterceptor] Missing token for request', {
+            method: request.method,
+            url: request.url
+          });
+          return next.handle(request);
+        }
+
         const authorizedRequest = request.clone({
           setHeaders: {
-            Authorization: `Bearer ${token}`
+            Authorization: `Bearer ${resolvedToken}`
           }
+        });
+
+        console.debug('[JwtInterceptor] Token attached', {
+          method: request.method,
+          url: request.url,
+          tokenLength: resolvedToken.length
         });
 
         return next.handle(authorizedRequest);
       }),
-      catchError(() => next.handle(request))
+      catchError((error) => {
+        console.error('[JwtInterceptor] Failed to resolve token', {
+          method: request.method,
+          url: request.url,
+          message: error?.message || String(error)
+        });
+        return next.handle(request);
+      })
     );
   }
 }

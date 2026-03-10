@@ -11,36 +11,41 @@ import { AuthGuard } from './shared/guards/auth.guard';
 
 const routes: Routes = [
   { path: '', redirectTo: '/login', pathMatch: 'full' },
-  { path: 'login', component: LoginComponent },
-  { path: 'register', component: RegisterComponent },
+  { path: 'login', component: LoginComponent, canActivate: [AuthGuard], data: { guestOnly: true } },
+  { path: 'register', component: RegisterComponent, canActivate: [AuthGuard], data: { guestOnly: true } },
   {
     path: 'home',
     component: HomeComponent,
     canActivate: [AuthGuard]
   },
-  { 
-    path: 'teacher', 
+  {
+    path: 'professor',
     component: TeacherDashboardComponent,
     canActivate: [AuthGuard],
-    data: { roles: ['TEACHER', 'ADMIN'] }
+    data: { roles: ['professor', 'administrador'] }
   },
   { 
-    path: 'student', 
+    path: 'aluno', 
     component: StudentDashboardComponent,
     canActivate: [AuthGuard],
-    data: { roles: ['STUDENT', 'ADMIN', 'TEACHER'] }
+    data: { roles: ['aluno', 'visitante', 'administrador', 'professor'] }
   },
   { 
-    path: 'admin', 
+    path: 'administrador', 
     component: AdminDashboardComponent,
     canActivate: [AuthGuard],
-    data: { roles: ['ADMIN'] }
+    data: { roles: ['administrador'] }
   },
   { 
     path: 'videos', 
     component: StudentDashboardComponent,
     canActivate: [AuthGuard],
-    data: { roles: ['STUDENT', 'ADMIN', 'TEACHER'] }
+    data: { roles: ['aluno', 'visitante', 'administrador', 'professor'] }
+  },
+  {
+    path: 'visitante',
+    redirectTo: '/aluno',
+    pathMatch: 'full'
   },
   { 
     path: 'video/:id', 

@@ -128,18 +128,18 @@ export class VideoPlayerComponent implements OnInit, OnDestroy {
   }
 
   goBack(): void {
-    if (this.authService.hasRole('ADMIN')) {
-      this.router.navigate(['/admin']);
+    if (this.authService.hasRole('administrador')) {
+      this.router.navigate(['/administrador']);
       return;
     }
 
-    if (this.authService.hasRole('TEACHER')) {
-      this.router.navigate(['/teacher']);
+    if (this.authService.hasRole('professor')) {
+      this.router.navigate(['/professor']);
       return;
     }
 
-    if (this.authService.hasRole('STUDENT')) {
-      this.router.navigate(['/student']);
+    if (this.authService.hasRole('aluno')) {
+      this.router.navigate(['/aluno']);
       return;
     }
 

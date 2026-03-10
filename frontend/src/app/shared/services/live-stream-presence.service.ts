@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
 import { Observable, Subject, Subscription } from 'rxjs';
 import { StreamGatewayService } from './stream-gateway.service';
+import { isFeatureOn } from '../constants/feature-flags';
 
 @Injectable({
   providedIn: 'root'
@@ -14,6 +15,10 @@ export class LiveStreamPresenceService {
   constructor(private streamGatewayService: StreamGatewayService) {}
 
   startWatching(): void {
+    if (!isFeatureOn('streamOn')) {
+      return;
+    }
+
     if (this.streamWatcher) {
       return;
     }

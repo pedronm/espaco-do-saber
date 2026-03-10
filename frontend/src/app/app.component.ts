@@ -1,9 +1,9 @@
 import { Component, OnDestroy, OnInit } from '@angular/core';
-import { Router } from '@angular/router';
+import { NavigationEnd, Router } from '@angular/router';
 import { AuthService } from './shared/services/auth.service';
 import { environment } from '../environments/environment';
 import { LiveStreamPresenceService } from './shared/services/live-stream-presence.service';
-import { Subscription } from 'rxjs';
+import { Subscription, filter } from 'rxjs';
 
 @Component({
   standalone: false,
@@ -17,7 +17,7 @@ import { Subscription } from 'rxjs';
         </div>
         <div class="nav-links">
           <a [routerLink]="getDashboardRoute()" routerLinkActive="active">Quadro de aulas</a>
-          <a *ngIf="isTeacher || isAdmin" [routerLink]="['/teacher']" routerLinkActive="active">Minhas gravações</a>
+          <a *ngIf="isTeacher || isAdmin" [routerLink]="['/professor']" routerLinkActive="active">Minhas gravações</a>
           <a [routerLink]="['/videos']" routerLinkActive="active">Videos</a>
           <button (click)="logout()" class="btn-logout">Sair</button>
         </div>
@@ -105,6 +105,8 @@ export class AppComponent implements OnInit, OnDestroy {
   liveToastMessage: string = '';
 
   private liveNotificationSubscription?: Subscription;
+  private authSubscription?: Subscription;
+  private routerSubscription?: Subscription;
   private toastTimeout?: ReturnType<typeof setTimeout>;
 
   constructor(
@@ -114,7 +116,30 @@ export class AppComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit(): void {
-    this.liveStreamPresenceService.startWatching();
+    this.authSubscription = this.authService.currentUser.subscribe((user) => {
+      if (user) {
+        this.liveStreamPresenceService.startWatching();
+        return;
+      }
+
+      this.liveStreamPresenceService.stopWatching();
+      this.liveToastMessage = '';
+
+      const currentPath = this.router.url.split('?')[0];
+      if (currentPath !== '/login' && currentPath !== '/register') {
+        this.router.navigate(['/login']);
+      }
+    });
+
+    this.routerSubscription = this.router.events.pipe(
+      filter((event): event is NavigationEnd => event instanceof NavigationEnd)
+    ).subscribe(() => {
+      const currentPath = this.router.url.split('?')[0];
+      if ((currentPath === '/login' || currentPath === '/register') && this.authService.isAuthenticated()) {
+        this.router.navigate([this.getDashboardRoute()]);
+      }
+    });
+
     this.liveNotificationSubscription = this.liveStreamPresenceService.onNewStream().subscribe((streamId) => {
       this.liveToastMessage = `Nova transmissão ao vivo iniciada: ${streamId}`;
       if (this.toastTimeout) {
@@ -127,6 +152,8 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.authSubscription?.unsubscribe();
+    this.routerSubscription?.unsubscribe();
     this.liveNotificationSubscription?.unsubscribe();
     this.liveStreamPresenceService.stopWatching();
     if (this.toastTimeout) {
@@ -139,28 +166,29 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   get isAdmin(): boolean {
-    return this.authService.hasRole('ADMIN');
+    return this.authService.hasRole('administrador');
   }
 
   get isTeacher(): boolean {
-    return this.authService.hasRole('TEACHER');
+    return this.authService.hasRole('professor');
   }
 
   getDashboardRoute(): string {
     const user = this.authService.currentUserValue;
     if (!user) return '/login';
     console.log(`User Logged In: ${user.roles}`);
-    let route = '/';
+    let route = '/aluno';
     user.roles?.forEach( role => {
       switch (role) {
-        case 'ADMIN':
-          route ='/admin';
+        case 'administrador':
+          route ='/administrador';
           break;
-        case 'TEACHER':
-          route ='/teacher';
+        case 'professor':
+          route ='/professor';
           break;
-        case 'STUDENT':
-          route ='/student';
+        case 'aluno':
+        case 'visitante':
+          route ='/aluno';
           break;
       }
     });

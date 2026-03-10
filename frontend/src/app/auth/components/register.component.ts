@@ -1,7 +1,8 @@
 import { Component } from '@angular/core';
+import { Router } from '@angular/router';
 import { AuthService } from '../../shared/services/auth.service';
 import { RegisterRequest } from '../../shared/models/user.model';
-import { Router } from '@angular/router';
+import { FormMessage } from '../../shared/constants/form-messages';
 
 @Component({
   standalone: false,
@@ -47,24 +48,46 @@ import { Router } from '@angular/router';
 
           <div class="form-group">
             <label for="password">Senha</label>
-            <input
-              id="password"
-              type="password"
-              name="password"
-              [(ngModel)]="registerData.password"
-              required
-            >
+            <div class="password-input-wrapper">
+              <input
+                id="password"
+                [type]="showPassword ? 'text' : 'password'"
+                name="password"
+                [(ngModel)]="registerData.password"
+                required
+              >
+              <button
+                type="button"
+                class="toggle-password"
+                (click)="togglePasswordVisibility()"
+                [attr.aria-label]="showPassword ? 'Ocultar senha' : 'Mostrar senha'"
+                [attr.title]="showPassword ? 'Ocultar senha' : 'Mostrar senha'"
+              >
+                {{ showPassword ? 'Ocultar' : 'Mostrar' }}
+              </button>
+            </div>
           </div>
 
           <div class="form-group">
             <label for="confirmPassword">Confirmar senha</label>
-            <input
-              id="confirmPassword"
-              type="password"
-              name="confirmPassword"
-              [(ngModel)]="registerData.confirmPassword"
-              required
-            >
+            <div class="password-input-wrapper">
+              <input
+                id="confirmPassword"
+                [type]="showConfirmPassword ? 'text' : 'password'"
+                name="confirmPassword"
+                [(ngModel)]="registerData.confirmPassword"
+                required
+              >
+              <button
+                type="button"
+                class="toggle-password"
+                (click)="toggleConfirmPasswordVisibility()"
+                [attr.aria-label]="showConfirmPassword ? 'Ocultar confirmacao de senha' : 'Mostrar confirmacao de senha'"
+                [attr.title]="showConfirmPassword ? 'Ocultar confirmacao de senha' : 'Mostrar confirmacao de senha'"
+              >
+                {{ showConfirmPassword ? 'Ocultar' : 'Mostrar' }}
+              </button>
+            </div>
           </div>
 
           <div class="form-group">
@@ -74,8 +97,8 @@ import { Router } from '@angular/router';
               name="accessType"
               [(ngModel)]="registerData.accessType"
             >
-              <option value="ALUNO">Aluno</option>
-              <option value="PUBLICO">Público</option>
+              <option value="aluno">Aluno</option>
+              <option value="visitante">Público</option>
             </select>
           </div>
 
@@ -130,6 +153,44 @@ import { Router } from '@angular/router';
       border-radius: 4px;
       font-size: 1rem;
     }
+    .password-input-wrapper {
+      position: relative;
+    }
+    .password-input-wrapper input {
+      padding-right: 5.5rem;
+    }
+    .toggle-password {
+      position: absolute;
+      top: 50%;
+      right: 0.4rem;
+      transform: translateY(-50%);
+      border: none;
+      background: transparent;
+      color: #1976d2;
+      font-size: 0.8rem;
+      cursor: pointer;
+      padding: 0.2rem 0.35rem;
+      border-radius: 4px;
+    }
+    .toggle-password:hover {
+      background: #eef5ff;
+    }
+    .checkbox-group label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 500;
+    }
+    .checkbox-group input[type='checkbox'] {
+      width: auto;
+      padding: 0;
+    }
+    .hint {
+      display: block;
+      margin-top: 0.35rem;
+      color: #666;
+      font-size: 0.82rem;
+    }
     .btn-primary {
       width: 100%;
       padding: 0.75rem;
@@ -172,12 +233,14 @@ export class RegisterComponent {
     password: '',
     confirmPassword: '',
     fullName: '',
-    accessType: 'ALUNO'
+    accessType: 'visitante'
   };
 
   loading = false;
   error = '';
   success = '';
+  showPassword = false;
+  showConfirmPassword = false;
 
   constructor(private authService: AuthService, private router: Router) {}
 
@@ -186,26 +249,78 @@ export class RegisterComponent {
     this.success = '';
 
     if (!this.registerData.username || !this.registerData.email || !this.registerData.password || !this.registerData.confirmPassword || !this.registerData.fullName) {
-      this.error = 'Preencha todos os campos obrigatórios.';
+      this.error = FormMessage.REGISTER_REQUIRED_FIELDS;
       return;
     }
 
     if (this.registerData.password !== this.registerData.confirmPassword) {
-      this.error = 'As senhas não conferem.';
+      this.error = FormMessage.REGISTER_PASSWORD_MISMATCH;
+      return;
+    }
+
+    if ((this.registerData.password || '').length < 8) {
+      this.error = FormMessage.REGISTER_PASSWORD_MIN_LENGTH;
       return;
     }
 
     this.loading = true;
     this.authService.register(this.registerData).subscribe({
       next: (response) => {
-        this.success = response.message || 'Cadastro realizado com sucesso.';
+        this.success = response.message || FormMessage.REGISTER_SUCCESS_SENT;
         this.loading = false;
         setTimeout(() => this.router.navigate(['/login']), 1000);
       },
       error: (error) => {
-        this.error = error?.error?.message || 'Não foi possível concluir o cadastro.';
+        this.error = this.extractRegisterErrorMessage(error);
         this.loading = false;
       }
     });
+  }
+
+  togglePasswordVisibility(): void {
+    this.showPassword = !this.showPassword;
+  }
+
+  toggleConfirmPasswordVisibility(): void {
+    this.showConfirmPassword = !this.showConfirmPassword;
+  }
+
+  private extractRegisterErrorMessage(error: any): string {
+    if (error?.status === 409) {
+      return FormMessage.REGISTER_DUPLICATE;
+    }
+
+    const apiMessage =
+      error?.error?.message ||
+      error?.error?.error_description ||
+      error?.message;
+
+    if (typeof apiMessage === 'string' && apiMessage.trim().length > 0) {
+      const normalized = apiMessage.toLowerCase();
+
+      if (normalized.includes('already') || normalized.includes('exists') || normalized.includes('duplicate')) {
+        return FormMessage.REGISTER_DUPLICATE;
+      }
+
+      if (normalized.includes('password')) {
+        return FormMessage.PASSWORD_INVALID_RULE;
+      }
+
+      if (normalized.includes('network') || normalized.includes('fetch')) {
+        return FormMessage.REGISTER_CONNECTIVITY_RETRY;
+      }
+
+      if (normalized.includes('invalid')) {
+        return FormMessage.REGISTER_INVALID_DATA;
+      }
+
+      return apiMessage;
+    }
+
+    if (error?.status === 0) {
+      return FormMessage.REGISTER_CONNECTIVITY_FAILED;
+    }
+
+    return FormMessage.REGISTER_FAILED;
   }
 }

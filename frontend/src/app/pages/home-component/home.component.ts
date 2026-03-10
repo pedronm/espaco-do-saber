@@ -14,15 +14,15 @@ export class HomeComponent {
   constructor(private authService: AuthService) {}
 
   get isAdmin(): boolean {
-    return this.authService.hasRole('ADMIN');
+    return this.authService.hasRole('administrador');
   }
 
   get isTeacher(): boolean {
-    return this.authService.hasRole('TEACHER');
+    return this.authService.hasRole('professor');
   }
 
   get isStudent(): boolean {
-    return this.authService.hasRole('STUDENT');
+    return this.authService.hasRole('aluno') || this.authService.hasRole('visitante');
   }
 
 }

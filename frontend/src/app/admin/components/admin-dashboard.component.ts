@@ -5,6 +5,7 @@ import { Video } from '../../shared/models/video.model';
 import { StreamGatewayService } from '../../shared/services/stream-gateway.service';
 import { ManagedUser, UserManagementService } from '../../shared/services/user-management.service';
 import { Subscription } from 'rxjs';
+import { AuthService } from '../../shared/services/auth.service';
 
 @Component({
   standalone: false,
@@ -54,8 +55,8 @@ import { Subscription } from 'rxjs';
               <div>{{ user.username }} • {{ user.email }}</div>
             </div>
             <div class="user-actions">
-              <button class="btn-action approve" (click)="approveUser(user.id)">Aprovar</button>
-              <button class="btn-action reject" (click)="rejectUser(user.id)">Rejeitar</button>
+              <button class="btn-action approve" (click)="approveUser(toNumberId(user.id))">Aprovar</button>
+              <button class="btn-action reject" (click)="rejectUser(toNumberId(user.id))">Rejeitar</button>
             </div>
           </div>
         </div>
@@ -238,23 +239,39 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     private videoService: VideoService,
     private userManagementService: UserManagementService,
     private streamGatewayService: StreamGatewayService,
+    private authService: AuthService,
     private router: Router
   ) {}
 
   ngOnInit(): void {
+    if (!this.authService.isAuthenticated()) {
+      this.router.navigate(['/login']);
+      return;
+    }
+
+    if (!this.authService.hasRole('administrador')) {
+      this.router.navigate(['/aluno']);
+      return;
+    }
+
     this.loadAllVideos();
     this.loadUsers();
-    this.liveSubscription = this.streamGatewayService.watchActiveStreams().subscribe(streams => {
-      const previousCount = this.previousActiveLiveCount;
-      this.activeLiveStreams = streams;
-      this.previousActiveLiveCount = streams.length;
+    this.liveSubscription = this.streamGatewayService.watchActiveStreams().subscribe({
+      next: (streams) => {
+        const previousCount = this.previousActiveLiveCount;
+        this.activeLiveStreams = streams;
+        this.previousActiveLiveCount = streams.length;
 
-      if (previousCount > streams.length) {
-        this.loadAllVideos();
+        if (previousCount > streams.length) {
+          this.loadAllVideos();
+        }
+      },
+      error: (error) => {
+        console.warn('[AdminDashboard] Live stream polling failed', error);
+        this.activeLiveStreams = [];
       }
     });
     this.obsServerUrl = this.streamGatewayService.getObsServerUrl();
-    this.regenerateStreamKey();
   }
 
   ngOnDestroy(): void {
@@ -319,6 +336,11 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   }
 
   approveUser(userId: number): void {
+    if (!Number.isFinite(userId)) {
+      alert('ID de usuário inválido para aprovação.');
+      return;
+    }
+
     this.userManagementService.approveUser(userId).subscribe({
       next: () => this.loadUsers(),
       error: () => alert('Falha ao aprovar cadastro.')
@@ -326,6 +348,11 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   }
 
   rejectUser(userId: number): void {
+    if (!Number.isFinite(userId)) {
+      alert('ID de usuário inválido para rejeição.');
+      return;
+    }
+
     this.userManagementService.rejectUser(userId).subscribe({
       next: () => this.loadUsers(),
       error: () => alert('Falha ao rejeitar cadastro.')
@@ -375,6 +402,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       default:
         return 'Aluno';
     }
+  }
+
+  toNumberId(id: string | number): number {
+    return Number(id);
   }
 
   private extractLiveIdFromStreamingUrl(streamingUrl: string | undefined): string | null {

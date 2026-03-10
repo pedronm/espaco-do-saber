@@ -4,6 +4,7 @@ import { VideoService } from '../../shared/services/video.service';
 import { Video } from '../../shared/models/video.model';
 import { StreamGatewayService } from '../../shared/services/stream-gateway.service';
 import { Subscription } from 'rxjs';
+import { AuthService } from '../../shared/services/auth.service';
 
 @Component({
   standalone: false,
@@ -201,22 +202,38 @@ export class TeacherDashboardComponent implements OnInit, OnDestroy {
   constructor(
     private videoService: VideoService,
     private streamGatewayService: StreamGatewayService,
+    private authService: AuthService,
     private router: Router
   ) {}
 
   ngOnInit(): void {
-    this.loadVideos();
-    this.liveSubscription = this.streamGatewayService.watchActiveStreams().subscribe(streams => {
-      const previousCount = this.previousActiveLiveCount;
-      this.activeLiveStreams = streams;
-      this.previousActiveLiveCount = streams.length;
+    if (!this.authService.isAuthenticated()) {
+      this.router.navigate(['/login']);
+      return;
+    }
 
-      if (previousCount > streams.length) {
-        this.loadVideos();
+    if (!this.authService.hasRole('professor') && !this.authService.hasRole('administrador')) {
+      this.router.navigate(['/aluno']);
+      return;
+    }
+
+    this.loadVideos();
+    this.liveSubscription = this.streamGatewayService.watchActiveStreams().subscribe({
+      next: (streams) => {
+        const previousCount = this.previousActiveLiveCount;
+        this.activeLiveStreams = streams;
+        this.previousActiveLiveCount = streams.length;
+
+        if (previousCount > streams.length) {
+          this.loadVideos();
+        }
+      },
+      error: (error) => {
+        console.warn('[TeacherDashboard] Live stream polling failed', error);
+        this.activeLiveStreams = [];
       }
     });
     this.obsServerUrl = this.streamGatewayService.getObsServerUrl();
-    this.regenerateStreamKey();
   }
 
   ngOnDestroy(): void {

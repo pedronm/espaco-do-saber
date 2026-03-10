@@ -3,19 +3,18 @@ import { cors } from 'hono/cors';
 import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
 import { neon } from '@neondatabase/serverless';
 
-type Role = 'ADMIN' | 'TEACHER' | 'STUDENT';
+type Role = 'administrador' | 'professor' | 'aluno' | 'visitante';
 
 type AppBindings = {
   VIDEOS_BUCKET: R2Bucket;
+  VIDEO_PROCESSING: Fetcher;
   APP_ENV: string;
   FRONTEND_ORIGIN?: string;
-  AUTH0_DOMAIN: string;
-  AUTH0_AUDIENCE: string;
-  AUTH0_ISSUER?: string;
-  AUTH0_ROLES_CLAIM?: string;
-  AUTH0_CLIENT_ID?: string;
-  AUTH0_CLIENT_SECRET?: string;
-  AUTH0_DB_CONNECTION?: string;
+  SUPABASE_URL: string;
+  SUPABASE_JWT_AUDIENCE?: string;
+  SUPABASE_JWT_ISSUER?: string;
+  AUTH_ROLES_CLAIM?: string;
+  SUPABASE_SERVICE_ROLE_KEY?: string;
   MUX_TOKEN_ID: string;
   MUX_TOKEN_SECRET: string;
   MUX_WEBHOOK_SECRET?: string;
@@ -28,119 +27,172 @@ type AppVariables = {
   user: { sub: string; email?: string; roles: Role[]; raw: JWTPayload };
 };
 
+type RegisterPayload = {
+  username?: string;
+  email?: string;
+  password?: string;
+  confirmPassword?: string;
+  fullName?: string;
+  accessType?: 'PUBLICO' | 'ALUNO';
+};
+
 const app = new Hono<{ Bindings: AppBindings; Variables: AppVariables }>();
 
 app.use('/*', async (c, next) => {
-  const origin = c.env.FRONTEND_ORIGIN || '*';
-  return cors({ origin, allowHeaders: ['Authorization', 'Content-Type'], allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'] })(c, next);
+  const startedAt = Date.now();
+  const requestId = crypto.randomUUID();
+
+  console.log(JSON.stringify({
+    level: 'info',
+    event: 'request.start',
+    requestId,
+    method: c.req.method,
+    path: c.req.path,
+    origin: c.req.header('Origin') || null,
+    userAgent: c.req.header('User-Agent') || null
+  }));
+
+  await next();
+
+  c.res.headers.set('x-request-id', requestId);
+
+  console.log(JSON.stringify({
+    level: 'info',
+    event: 'request.end',
+    requestId,
+    method: c.req.method,
+    path: c.req.path,
+    status: c.res.status,
+    durationMs: Date.now() - startedAt
+  }));
+});
+
+app.use('/*', async (c, next) => {
+  const allowedOrigins = resolveAllowedOrigins(c.env.FRONTEND_ORIGIN);
+  return cors({
+    origin: (requestOrigin) => {
+      if (!requestOrigin) {
+        return allowedOrigins[0] || '*';
+      }
+
+      if (allowedOrigins.includes('*') || allowedOrigins.includes(requestOrigin)) {
+        return requestOrigin;
+      }
+
+      return '';
+    },
+    allowHeaders: ['Authorization', 'Content-Type', 'apikey', 'x-client-info', 'x-supabase-auth', 'sb-access-token'],
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+  })(c, next);
+});
+
+app.onError((error, c) => {
+  const allowedOrigins = resolveAllowedOrigins(c.env.FRONTEND_ORIGIN);
+  const requestOrigin = c.req.header('Origin');
+  const responseOrigin = resolveResponseOrigin(requestOrigin, allowedOrigins);
+
+  console.error(JSON.stringify({
+    level: 'error',
+    event: 'request.error',
+    method: c.req.method,
+    path: c.req.path,
+    message: error?.message || 'Unhandled worker error',
+    stack: error?.stack || null
+  }));
+
+  const response = c.json({ message: 'Internal server error' }, 500);
+  if (responseOrigin) {
+    response.headers.set('Access-Control-Allow-Origin', responseOrigin);
+    response.headers.set('Vary', 'Origin');
+  }
+
+  return response;
 });
 
 app.get('/health', (c) => c.json({ ok: true, service: 'workers-api', env: c.env.APP_ENV || 'unknown' }));
 
-app.post('/api/auth/register', async (c) => {
-  const payload = await c.req.json<{
-    username?: string;
-    email?: string;
-    password?: string;
-    confirmPassword?: string;
-    fullName?: string;
-    accessType?: 'PUBLICO' | 'ALUNO';
-  }>().catch(() => ({}));
+app.all('/videos/*', async (c) => {
+  const incomingUrl = new URL(c.req.url);
+  const forwardedPath = incomingUrl.pathname.replace(/^\/videos/, '') || '/';
+  const targetUrl = new URL(`https://video-processing.internal${forwardedPath}${incomingUrl.search}`);
 
-  const username = (payload.username || '').trim();
-  const email = (payload.email || '').trim().toLowerCase();
-  const password = payload.password || '';
-  const confirmPassword = payload.confirmPassword || '';
-  const fullName = (payload.fullName || '').trim();
-  const accessType = payload.accessType || 'ALUNO';
+  const forwardedRequest = new Request(targetUrl.toString(), c.req.raw);
+  return c.env.VIDEO_PROCESSING.fetch(forwardedRequest);
+});
 
-  if (!username || !email || !password || !confirmPassword || !fullName) {
-    return c.json({ message: 'Campos obrigatórios não informados.', pendingApproval: false }, 400);
-  }
-
-  if (password !== confirmPassword) {
-    return c.json({ message: 'As senhas não conferem.', pendingApproval: false }, 400);
-  }
-
-  if (password.length < 8) {
-    return c.json({ message: 'A senha deve ter ao menos 8 caracteres.', pendingApproval: false }, 400);
-  }
-
+app.get('/api/videos/public', async (c) => {
   try {
-    const managementToken = await getAuth0ManagementToken(c.env);
-    const connection = c.env.AUTH0_DB_CONNECTION || 'Username-Password-Authentication';
-    const role = accessType === 'PUBLICO' ? 'STUDENT' : 'STUDENT';
+    const sql = neon(c.env.NEON_DATABASE_URL);
+    const rows = await sql`
+      select id, title, description, teacher_id as "teacherId", teacher_name as "teacherName",
+             duration, is_live as "isLive", was_live as "wasLive", is_public as "isPublic",
+             uploaded_at as "uploadedAt", streaming_url as "streamingUrl", playback_id as "playbackId"
+      from videos
+      where is_public = true
+      order by uploaded_at desc
+      limit 200
+    `;
 
-    const createUserResponse = await fetch(`https://${c.env.AUTH0_DOMAIN}/api/v2/users`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${managementToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        connection,
-        username,
-        email,
-        password,
-        name: fullName,
-        email_verified: false,
-        verify_email: true,
-        app_metadata: {
-          roles: [role]
-        },
-        user_metadata: {
-          accessType,
-          fullName
-        }
-      })
-    });
-
-    if (!createUserResponse.ok) {
-      const errorPayload = await createUserResponse.json<any>().catch(() => ({}));
-      const message =
-        errorPayload?.message ||
-        errorPayload?.error_description ||
-        'Não foi possível criar usuário no Auth0.';
-      const status = createUserResponse.status === 409 ? 409 : 502;
-      return c.json({ message, pendingApproval: false }, status);
-    }
-
-    return c.json({
-      message: 'Cadastro realizado com sucesso. Verifique seu e-mail para confirmação.',
-      pendingApproval: false
-    }, 201);
+    return c.json(rows);
   } catch (error) {
-    return c.json({ message: 'Falha ao registrar usuário no Auth0.', pendingApproval: false }, 500);
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'videos.public.failed',
+      message: error instanceof Error ? error.message : String(error)
+    }));
+    return c.json({ message: 'Failed to load public videos' }, 500);
   }
 });
 
 app.use('/api/*', async (c, next) => {
-  const authHeader = c.req.header('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
+  if (c.req.method === 'OPTIONS') {
+    await next();
+    return;
+  }
+
+  const tokenInfo = extractBearerTokenFromRequest(c);
+  if (!tokenInfo) {
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'auth.missing-token',
+      method: c.req.method,
+      path: c.req.path,
+      origin: c.req.header('Origin') || null,
+      hasAuthorization: Boolean(c.req.header('Authorization')),
+      hasCookie: Boolean(c.req.header('Cookie'))
+    }));
     return c.json({ message: 'Missing bearer token' }, 401);
   }
 
-  const token = authHeader.substring('Bearer '.length).trim();
-  const domain = c.env.AUTH0_DOMAIN;
-  const issuer = c.env.AUTH0_ISSUER || `https://${domain}/`;
-  const audience = c.env.AUTH0_AUDIENCE;
+  const issuer = c.env.SUPABASE_JWT_ISSUER || `${c.env.SUPABASE_URL}/auth/v1`;
+  const audience = c.env.SUPABASE_JWT_AUDIENCE || 'authenticated';
 
   try {
-    const jwks = createRemoteJWKSet(new URL(`https://${domain}/.well-known/jwks.json`));
-    const { payload } = await jwtVerify(token, jwks, { issuer, audience });
-    const roleClaimKey = c.env.AUTH0_ROLES_CLAIM || 'https://espacodosaber.com/roles';
-    const roleClaim = payload[roleClaimKey] as string[] | undefined;
-    const roles = (roleClaim || []).filter((r): r is Role => r === 'ADMIN' || r === 'TEACHER' || r === 'STUDENT');
+    const jwks = createRemoteJWKSet(new URL(`${c.env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`));
+    const { payload } = await jwtVerify(tokenInfo.token, jwks, { issuer, audience });
+    const roleClaimKey = c.env.AUTH_ROLES_CLAIM || 'user_role';
+    const roleClaim = getClaimByPath(payload, roleClaimKey);
+    const fallbackClaim = getClaimByPath(payload, 'app_metadata.roles');
+    const roles = normalizeRoles(roleClaim ?? fallbackClaim);
+    const resolvedRoles: Role[] = roles.length > 0 ? roles : ['aluno'];
 
     c.set('user', {
       sub: String(payload.sub || ''),
       email: typeof payload.email === 'string' ? payload.email : undefined,
-      roles,
+      roles: resolvedRoles,
       raw: payload
     });
 
     await next();
-  } catch {
+  } catch (error) {
+    console.warn(JSON.stringify({
+      level: 'warn',
+      event: 'auth.invalid-token',
+      method: c.req.method,
+      path: c.req.path,
+      tokenSource: tokenInfo.source,
+      message: error instanceof Error ? error.message : String(error)
+    }));
     return c.json({ message: 'Invalid token' }, 401);
   }
 });
@@ -150,40 +202,94 @@ app.get('/api/me', (c) => {
   return c.json({ sub: user.sub, email: user.email, roles: user.roles });
 });
 
-app.get('/api/videos/public', async (c) => {
-  const sql = neon(c.env.NEON_DATABASE_URL);
-  const rows = await sql`
-    select id, title, description, teacher_id as "teacherId", teacher_name as "teacherName",
-           duration, is_live as "isLive", was_live as "wasLive", is_public as "isPublic",
-           uploaded_at as "uploadedAt", streaming_url as "streamingUrl", playback_id as "playbackId"
-    from videos
-    where is_public = true
-    order by uploaded_at desc
-    limit 200
-  `;
+app.post('/api/auth/pending-approvals', async (c) => {
+  const user = c.get('user');
+  if (!user.roles.includes('administrador')) {
+    return c.json({ message: 'Forbidden' }, 403);
+  }
 
-  return c.json(rows);
+  if (!c.env.SUPABASE_SERVICE_ROLE_KEY) {
+    console.error('Supabase service role key is missing.');
+    return c.json({ message: 'Falha ao cadastrar!.' }, 500);
+  }
+
+  try {
+    const response = await fetch(`${c.env.SUPABASE_URL}/auth/v1/admin/users?page=1&per_page=200`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${c.env.SUPABASE_SERVICE_ROLE_KEY}`,
+        apikey: c.env.SUPABASE_SERVICE_ROLE_KEY,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      return c.json({ message: 'Unable to load pending approvals', detail }, 502);
+    }
+
+    const payload = await response.json<any>();
+    const users: any[] = Array.isArray(payload?.users) ? payload.users : [];
+
+    const pendingUsers = users
+      .filter((candidate) => {
+        const appMetadata = candidate?.app_metadata || {};
+        const pendingApproval = appMetadata?.pending_approval === true;
+        const missingEmailConfirmation = !candidate?.email_confirmed_at;
+        return pendingApproval || missingEmailConfirmation;
+      })
+      .map((candidate) => {
+        const appMetadata = candidate?.app_metadata || {};
+        const userMetadata = candidate?.user_metadata || {};
+        const mappedRole = toManagedUserRole(String(appMetadata?.app_role || appMetadata?.user_role || 'aluno'));
+        return {
+          id: String(candidate?.id || ''),
+          username: String(userMetadata?.username || candidate?.email || ''),
+          email: String(candidate?.email || ''),
+          fullName: String(userMetadata?.fullName || userMetadata?.name || candidate?.email || ''),
+          role: mappedRole,
+          active: Boolean(candidate?.email_confirmed_at),
+          passwordExpiresAt: null
+        };
+      });
+
+    return c.json(pendingUsers);
+  } catch (error) {
+    return c.json({
+      message: 'Failed to load pending approvals.',
+      detail: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
 });
 
 app.get('/api/videos/my-videos', async (c) => {
-  const user = c.get('user');
-  const sql = neon(c.env.NEON_DATABASE_URL);
-  const rows = await sql`
-    select id, title, description, teacher_id as "teacherId", teacher_name as "teacherName",
-           duration, is_live as "isLive", was_live as "wasLive", is_public as "isPublic",
-           uploaded_at as "uploadedAt", streaming_url as "streamingUrl", playback_id as "playbackId"
-    from videos
-    where teacher_id = ${user.sub}
-    order by uploaded_at desc
-    limit 200
-  `;
+  try {
+    const user = c.get('user');
+    const sql = neon(c.env.NEON_DATABASE_URL);
+    const rows = await sql`
+      select id, title, description, teacher_id as "teacherId", teacher_name as "teacherName",
+             duration, is_live as "isLive", was_live as "wasLive", is_public as "isPublic",
+             uploaded_at as "uploadedAt", streaming_url as "streamingUrl", playback_id as "playbackId"
+      from videos
+      where teacher_id = ${user.sub}
+      order by uploaded_at desc
+      limit 200
+    `;
 
-  return c.json(rows);
+    return c.json(rows);
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'videos.my.failed',
+      message: error instanceof Error ? error.message : String(error)
+    }));
+    return c.json({ message: 'Failed to load user videos' }, 500);
+  }
 });
 
 app.post('/api/mux/live-streams', async (c) => {
   const user = c.get('user');
-  const canPublish = user.roles.includes('TEACHER') || user.roles.includes('ADMIN');
+  const canPublish = user.roles.includes('professor') || user.roles.includes('administrador');
   if (!canPublish) {
     return c.json({ message: 'Forbidden' }, 403);
   }
@@ -192,28 +298,44 @@ app.post('/api/mux/live-streams', async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const playbackPolicy = body?.playbackPolicy === 'signed' ? ['signed'] : ['public'];
 
-  const response = await fetch('https://api.mux.com/video/v1/live-streams', {
-    method: 'POST',
-    headers: {
-      Authorization: `Basic ${basic}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      playback_policy: playbackPolicy,
-      new_asset_settings: {
-        playback_policy: playbackPolicy
+  let mux: any;
+  try {
+    const response = await fetch('https://api.mux.com/video/v1/live-streams', {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/json'
       },
-      reconnect_window: 60,
-      latency_mode: 'low'
-    })
-  });
+      body: JSON.stringify({
+        playback_policy: playbackPolicy,
+        new_asset_settings: {
+          playback_policy: playbackPolicy
+        },
+        reconnect_window: 60,
+        latency_mode: 'low'
+      })
+    });
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    return c.json({ message: 'Mux error', detail: errorText }, 502);
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'mux.create.failed',
+        status: response.status,
+        detail: errorText.slice(0, 1200)
+      }));
+      return c.json({ message: 'Mux error', detail: errorText }, 502);
+    }
+
+    mux = await response.json<any>();
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'mux.create.exception',
+      message: error instanceof Error ? error.message : String(error)
+    }));
+    return c.json({ message: 'Mux request failed' }, 502);
   }
-
-  const mux = await response.json<any>();
   const streamKey = mux?.data?.stream_key as string | undefined;
   const liveStreamId = mux?.data?.id as string | undefined;
   const playbackId = mux?.data?.playback_ids?.[0]?.id as string | undefined;
@@ -242,15 +364,33 @@ app.post('/api/mux/live-streams', async (c) => {
 
 app.get('/api/mux/live-streams/active', async (c) => {
   const basic = btoa(`${c.env.MUX_TOKEN_ID}:${c.env.MUX_TOKEN_SECRET}`);
-  const response = await fetch('https://api.mux.com/video/v1/live-streams?status=active&limit=100', {
-    headers: { Authorization: `Basic ${basic}` }
-  });
+  let payload: any;
+  try {
+    const response = await fetch('https://api.mux.com/video/v1/live-streams?status=active&limit=100', {
+      headers: { Authorization: `Basic ${basic}` }
+    });
 
-  if (!response.ok) {
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(JSON.stringify({
+        level: 'error',
+        event: 'mux.list.failed',
+        status: response.status,
+        detail: errorText.slice(0, 1200)
+      }));
+      return c.json({ message: 'Unable to list active streams' }, 502);
+    }
+
+    payload = await response.json<any>();
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'mux.list.exception',
+      message: error instanceof Error ? error.message : String(error)
+    }));
     return c.json({ message: 'Unable to list active streams' }, 502);
   }
 
-  const payload = await response.json<any>();
   const streams = (payload?.data || []).map((item: any) => ({
     id: item.id,
     playbackId: item?.playback_ids?.[0]?.id,
@@ -340,30 +480,176 @@ app.get('/api/bootstrap', async (c) => {
 
 export default app;
 
-async function getAuth0ManagementToken(env: AppBindings): Promise<string> {
-  if (!env.AUTH0_CLIENT_ID || !env.AUTH0_CLIENT_SECRET) {
-    throw new Error('Missing Auth0 management credentials');
+function getClaimByPath(payload: JWTPayload, path: string): unknown {
+  const segments = path.split('.').filter(Boolean);
+  let cursor: unknown = payload;
+
+  for (const segment of segments) {
+    if (!cursor || typeof cursor !== 'object' || !(segment in (cursor as Record<string, unknown>))) {
+      return undefined;
+    }
+
+    cursor = (cursor as Record<string, unknown>)[segment];
   }
 
-  const tokenResponse = await fetch(`https://${env.AUTH0_DOMAIN}/oauth/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'client_credentials',
-      client_id: env.AUTH0_CLIENT_ID,
-      client_secret: env.AUTH0_CLIENT_SECRET,
-      audience: `https://${env.AUTH0_DOMAIN}/api/v2/`
-    })
-  });
+  return cursor;
+}
 
-  if (!tokenResponse.ok) {
-    throw new Error('Unable to obtain Auth0 management token');
+function isRole(value: unknown): value is Role {
+  return value === 'administrador' || value === 'professor' || value === 'aluno' || value === 'visitante';
+}
+
+function mapRole(raw: string): Role | null {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'administrador') {
+    return 'administrador';
   }
 
-  const tokenPayload = await tokenResponse.json<{ access_token?: string }>();
-  if (!tokenPayload.access_token) {
-    throw new Error('Invalid Auth0 management token payload');
+  if (normalized === 'professor') {
+    return 'professor';
   }
 
-  return tokenPayload.access_token;
+  if (normalized === 'aluno') {
+    return 'aluno';
+  }
+
+  if (normalized === 'visitante') {
+    return 'visitante';
+  }
+
+  return null;
+}
+
+function normalizeRoles(raw: unknown): Role[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => mapRole(entry))
+      .filter((entry): entry is Role => !!entry)
+      .filter((entry, index, list) => list.indexOf(entry) === index);
+  }
+
+  if (typeof raw === 'string') {
+    const role = mapRole(raw);
+    return role ? [role] : [];
+  }
+
+  return [];
+}
+
+function extractBearerToken(authHeader: string | undefined): string | null {
+  if (!authHeader) {
+    return null;
+  }
+
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  if (match?.[1]) {
+    return match[1].trim();
+  }
+
+  // Fallback for clients that accidentally send only the raw JWT.
+  const trimmed = authHeader.trim();
+  if (trimmed.split('.').length === 3) {
+    return trimmed;
+  }
+
+  return null;
+}
+
+function extractBearerTokenFromRequest(c: { req: { header: (name: string) => string | undefined; query: (name: string) => string | undefined } }): { token: string; source: string } | null {
+  const headerCandidates = [
+    { key: 'authorization', value: c.req.header('Authorization') },
+    { key: 'x-supabase-auth', value: c.req.header('x-supabase-auth') },
+    { key: 'sb-access-token', value: c.req.header('sb-access-token') }
+  ];
+
+  for (const candidate of headerCandidates) {
+    const parsed = extractBearerToken(candidate.value) || extractJwtLike(candidate.value);
+    if (parsed) {
+      return { token: parsed, source: `header:${candidate.key}` };
+    }
+  }
+
+  const queryToken = c.req.query('access_token');
+  if (queryToken) {
+    const parsed = extractBearerToken(queryToken) || extractJwtLike(queryToken);
+    if (parsed) {
+      return { token: parsed, source: 'query:access_token' };
+    }
+  }
+
+  const cookieHeader = c.req.header('Cookie');
+  if (!cookieHeader) {
+    return null;
+  }
+
+  const cookieValues = cookieHeader.split(';').map((part) => part.trim());
+  for (const cookie of cookieValues) {
+    const separatorIndex = cookie.indexOf('=');
+    const rawValue = separatorIndex >= 0 ? cookie.slice(separatorIndex + 1) : cookie;
+    const decodedValue = decodeURIComponentSafe(rawValue);
+    const parsed = extractBearerToken(decodedValue) || extractJwtLike(decodedValue);
+    if (parsed) {
+      return { token: parsed, source: 'cookie' };
+    }
+  }
+
+  return null;
+}
+
+function extractJwtLike(input: string | undefined): string | null {
+  if (!input) {
+    return null;
+  }
+
+  const match = input.match(/([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  return match[1];
+}
+
+function decodeURIComponentSafe(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function resolveAllowedOrigins(configuredOrigins: string | undefined): string[] {
+  if (!configuredOrigins || configuredOrigins.trim().length === 0) {
+    return ['https://espacodosaber.cpmacursos.com'];
+  }
+
+  return configuredOrigins
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+}
+
+function resolveResponseOrigin(requestOrigin: string | undefined, allowedOrigins: string[]): string | null {
+  if (!requestOrigin) {
+    return allowedOrigins.includes('*') ? '*' : allowedOrigins[0] || null;
+  }
+
+  if (allowedOrigins.includes('*') || allowedOrigins.includes(requestOrigin)) {
+    return requestOrigin;
+  }
+
+  return null;
+}
+
+function toManagedUserRole(rawRole: string): 'ADMIN' | 'TEACHER' | 'STUDENT' {
+  const normalized = (rawRole || '').trim().toLowerCase();
+  if (normalized === 'administrador') {
+    return 'ADMIN';
+  }
+
+  if (normalized === 'professor') {
+    return 'TEACHER';
+  }
+
+  return 'STUDENT';
 }

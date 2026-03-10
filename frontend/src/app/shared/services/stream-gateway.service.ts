@@ -1,9 +1,10 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { map, Observable } from 'rxjs';
-import { switchMap } from 'rxjs/operators';
+import { map, Observable, of, tap } from 'rxjs';
+import { distinctUntilChanged, shareReplay, switchMap } from 'rxjs/operators';
 import { timer } from 'rxjs';
 import { environment } from '../../../environments/environment';
+import { isFeatureMuxOn, isFeatureStreamOn } from '../constants/feature-flags';
 
 @Injectable({
   providedIn: 'root'
@@ -11,26 +12,68 @@ import { environment } from '../../../environments/environment';
 export class StreamGatewayService {
   private readonly streamingApiUrl = this.normalizeBaseUrl(environment.streamingApiUrl);
   private readonly obsIngestBaseUrl = environment.obsIngestBaseUrl;
+  private readonly defaultPollIntervalMs = 15000;
+  private readonly minPollIntervalMs = 8000;
+  private activeStreamsPoll$?: Observable<string[]>;
+  private activeStreamsPollIntervalMs?: number;
 
   constructor(private http: HttpClient) {}
 
   createLiveStream(): Observable<{ id: string; streamKey: string; playbackId?: string; rtmpUrl: string; ingestUrl: string }> {
-    return this.http.post<{ id: string; streamKey: string; playbackId?: string; rtmpUrl: string; ingestUrl: string }>(
-      `${this.streamingApiUrl}/live-streams`,
-      {}
+    if (!isFeatureStreamOn() || !isFeatureMuxOn()) {
+      return this.getDisabledLiveStream();
+    }
+
+    const url = `${this.streamingApiUrl}/live-streams`;
+    console.debug('[StreamGatewayService] POST', url);
+    return this.http.post<{ id: string; streamKey: string; playbackId?: string; rtmpUrl: string; ingestUrl: string }>(url, {}).pipe(
+      tap((response) => {
+        console.debug('[StreamGatewayService] POST success', url, {
+          id: response?.id,
+          hasStreamKey: Boolean(response?.streamKey)
+        });
+      })
     );
   }
 
   getActiveStreams(): Observable<string[]> {
-    return this.http.get<{ streams?: { id: string }[] }>(`${this.streamingApiUrl}/live-streams/active`).pipe(
+    if (!isFeatureStreamOn()) {
+      return of([]);
+    }
+
+    const url = `${this.streamingApiUrl}/live-streams/active`;
+    console.debug('[StreamGatewayService] GET', url);
+    return this.http.get<{ streams?: { id: string }[] }>(url).pipe(
       map(response => (response?.streams ?? []).map(stream => stream.id))
+      ,
+      tap((streams) => {
+        console.debug('[StreamGatewayService] GET success', url, { count: streams.length });
+      })
     );
   }
 
-  watchActiveStreams(refreshMs: number = 5000): Observable<string[]> {
-    return timer(0, refreshMs).pipe(
-      switchMap(() => this.getActiveStreams())
-    );
+  watchActiveStreams(refreshMs: number = this.defaultPollIntervalMs): Observable<string[]> {
+    if (!isFeatureStreamOn()) {
+      return of([]);
+    }
+
+    const normalizedRefreshMs = this.normalizeRefreshMs(refreshMs);
+
+    if (!this.activeStreamsPoll$ || this.activeStreamsPollIntervalMs !== normalizedRefreshMs) {
+      this.activeStreamsPollIntervalMs = normalizedRefreshMs;
+      console.debug('[StreamGatewayService] Polling active streams configured', {
+        refreshMs: normalizedRefreshMs
+      });
+
+      // Share one polling flow across all subscribers to avoid duplicated requests.
+      this.activeStreamsPoll$ = timer(0, normalizedRefreshMs).pipe(
+        switchMap(() => this.getActiveStreams()),
+        distinctUntilChanged((previous, current) => this.areSameStreams(previous, current)),
+        shareReplay({ bufferSize: 1, refCount: true })
+      );
+    }
+
+    return this.activeStreamsPoll$;
   }
 
   getLiveFlvUrl(liveId: string): string {
@@ -74,5 +117,31 @@ export class StreamGatewayService {
 
   private encodePathSegment(segment: string): string {
     return encodeURIComponent((segment || '').trim());
+  }
+
+  private normalizeRefreshMs(refreshMs: number): number {
+    if (!Number.isFinite(refreshMs) || refreshMs <= 0) {
+      return this.defaultPollIntervalMs;
+    }
+
+    return Math.max(Math.trunc(refreshMs), this.minPollIntervalMs);
+  }
+
+  private areSameStreams(previous: string[], current: string[]): boolean {
+    if (previous.length !== current.length) {
+      return false;
+    }
+
+    return previous.every((value, index) => value === current[index]);
+  }
+
+  private getDisabledLiveStream(): Observable<{ id: string; streamKey: string; playbackId?: string; rtmpUrl: string; ingestUrl: string }> {
+    return of({
+      id: 'feature-disabled',
+      streamKey: 'feature-disabled',
+      playbackId: undefined,
+      rtmpUrl: this.getResolvedObsBaseUrl(),
+      ingestUrl: this.getResolvedObsBaseUrl()
+    });
   }
 }

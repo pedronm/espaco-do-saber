@@ -1,9 +1,10 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, forkJoin, of } from 'rxjs';
-import { catchError, map } from 'rxjs/operators';
+import { catchError, map, tap } from 'rxjs/operators';
 import { Video } from '../models/video.model';
 import { environment } from '../../../environments/environment';
+import { isFeatureR2On, isFeatureStreamOn, isFeatureVideoOn } from '../constants/feature-flags';
 
 @Injectable({
   providedIn: 'root'
@@ -14,6 +15,10 @@ export class VideoService {
   constructor(private http: HttpClient) {}
 
   uploadVideo(file: File, title: string, description: string, isPublic: boolean, isLive: boolean = false): Observable<Video> {
+    if (!isFeatureVideoOn() || !isFeatureR2On()) {
+      return of(this.createDisabledVideo(title, description, isPublic, isLive));
+    }
+
     return this.http.post<Video>(`${this.apiUrl}`, {
       title,
       description,
@@ -24,11 +29,31 @@ export class VideoService {
   }
 
   getPublicVideos(): Observable<Video[]> {
-    return this.http.get<Video[]>(`${this.apiUrl}/public`);
+    if (!isFeatureVideoOn()) {
+      return of([]);
+    }
+
+    const url = `${this.apiUrl}/public`;
+    console.debug('[VideoService] GET', url);
+    return this.http.get<Video[]>(url).pipe(
+      tap((videos) => {
+        console.debug('[VideoService] GET success', url, { count: videos?.length || 0 });
+      })
+    );
   }
 
   getMyVideos(): Observable<Video[]> {
-    return this.http.get<Video[]>(`${this.apiUrl}/my-videos`);
+    if (!isFeatureVideoOn()) {
+      return of([]);
+    }
+
+    const url = `${this.apiUrl}/my-videos`;
+    console.debug('[VideoService] GET', url);
+    return this.http.get<Video[]>(url).pipe(
+      tap((videos) => {
+        console.debug('[VideoService] GET success', url, { count: videos?.length || 0 });
+      })
+    );
   }
 
   getDashboardVideos(): Observable<Video[]> {
@@ -45,6 +70,10 @@ export class VideoService {
   }
 
   getLiveStreamStatus(liveId: string): Observable<{ status: 'ACTIVE' | 'COMPLETED' | 'NOT_FOUND', videoId?: number, title?: string }> {
+    if (!isFeatureStreamOn()) {
+      return of({ status: 'NOT_FOUND' as const });
+    }
+
     return this.http.get<{ streams: { id: string }[] }>(`${environment.streamingApiUrl}/live-streams/active`).pipe(
       map((response) => {
         const stream = (response.streams || []).find((item) => item.id === liveId);
@@ -59,14 +88,38 @@ export class VideoService {
   }
 
   getVideo(id: number): Observable<Video> {
+    if (!isFeatureVideoOn()) {
+      return of(this.createDisabledVideo('Conteudo indisponivel', 'Feature de video desabilitada.', true, false));
+    }
+
     return this.http.get<Video>(`${this.apiUrl}/${id}`);
   }
 
   trackVideoAccess(id: number): Observable<void> {
+    if (!isFeatureVideoOn()) {
+      return of(void 0);
+    }
+
     return this.http.post<void>(`${this.apiUrl}/${id}/access`, {});
   }
 
   getStreamUrl(id: number): string {
     return `${this.apiUrl}/stream/${id}`;
+  }
+
+  private createDisabledVideo(title: string, description: string, isPublic: boolean, isLive: boolean): Video {
+    return {
+      id: -1,
+      title,
+      description,
+      teacherId: 0,
+      teacherName: 'Sistema',
+      duration: 0,
+      isLive,
+      wasLive: isLive,
+      isPublic,
+      uploadedAt: new Date(),
+      streamingUrl: ''
+    };
   }
 }

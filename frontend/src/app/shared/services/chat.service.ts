@@ -1,10 +1,11 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { Client } from '@stomp/stompjs';
 import * as SockJS from 'sockjs-client';
 import { ChatMessage } from '../models/chat.model';
 import { environment } from '../../../environments/environment';
+import { isFeatureOn } from '../constants/feature-flags';
 
 @Injectable({
   providedIn: 'root'
@@ -17,12 +18,17 @@ export class ChatService {
 
   connect(token: string): Promise<void> {
     return new Promise((resolve, reject) => {
+      if (!isFeatureOn('streamOn')) {
+        reject(new Error('Chat feature is disabled by flag.'));
+        return;
+      }
+
       if (!environment.wsUrl) {
         reject(new Error('Chat websocket is not configured for this deployment.'));
         return;
       }
 
-      const socket = new SockJS(environment.wsUrl);
+      const socket = new (SockJS as any)(environment.wsUrl);
       this.stompClient = new Client({
         webSocketFactory: () => socket as any,
         connectHeaders: {
@@ -70,14 +76,26 @@ export class ChatService {
   }
 
   getConversation(userId: number): Observable<ChatMessage[]> {
+    if (!isFeatureOn('streamOn')) {
+      return of([]);
+    }
+
     return this.http.get<ChatMessage[]>(`${this.apiUrl}/conversation/${userId}`);
   }
 
   getUnreadMessages(): Observable<ChatMessage[]> {
+    if (!isFeatureOn('streamOn')) {
+      return of([]);
+    }
+
     return this.http.get<ChatMessage[]>(`${this.apiUrl}/unread`);
   }
 
   markAsRead(messageId: number): Observable<void> {
+    if (!isFeatureOn('streamOn')) {
+      return of(void 0);
+    }
+
     return this.http.put<void>(`${this.apiUrl}/${messageId}/read`, {});
   }
 }

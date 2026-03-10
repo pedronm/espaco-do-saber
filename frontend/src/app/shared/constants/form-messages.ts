@@ -1,0 +1,22 @@
+export enum FormMessage {
+  LOGIN_FILL_REQUIRED = 'Preencha usuario/e-mail e senha para continuar.',
+  LOGIN_FAILED = 'Nao foi possivel entrar agora. Tente novamente em instantes.',
+  LOGIN_FAILED_CHECK_DATA = 'Nao foi possivel entrar agora. Verifique seus dados e tente novamente.',
+  LOGIN_FAILED_CREDENTIALS = 'Usuario/e-mail ou senha incorretos. Confira os dados e tente novamente.',
+  LOGIN_FAILED_FALLBACK = 'Nao foi possivel fazer login agora. Verifique seu usuario/e-mail e senha e tente novamente.',
+  EMAIL_NOT_CONFIRMED = 'Seu e-mail ainda nao foi confirmado. Verifique sua caixa de entrada para ativar a conta.',
+  NETWORK_FAILED = 'Falha de conexao. Verifique sua internet e tente novamente.',
+  REGISTER_SUCCESS_PENDING = 'Cadastro realizado com sucesso. Aguarde a aprovacao do administrador.',
+  REGISTER_SUCCESS_SENT = 'Cadastro enviado com sucesso. Aguarde a aprovacao para acessar a plataforma.',
+  REGISTER_REQUIRED_FIELDS = 'Preencha todos os campos obrigatorios.',
+  REGISTER_PASSWORD_MISMATCH = 'As senhas nao conferem.',
+  REGISTER_PASSWORD_MIN_LENGTH = 'A senha deve ter ao menos 8 caracteres.',
+  REGISTER_FAILED = 'Nao foi possivel concluir o cadastro agora. Tente novamente em instantes.',
+  REGISTER_CONNECTIVITY_FAILED = 'Nao foi possivel se conectar ao servico de cadastro.',
+  REGISTER_CONNECTIVITY_RETRY = 'Nao foi possivel se conectar ao servico de cadastro. Tente novamente.',
+  REGISTER_DUPLICATE = 'Ja existe uma conta com este usuario ou e-mail.',
+  REGISTER_INVALID_DATA = 'Alguns dados informados sao invalidos. Revise os campos e tente novamente.',
+  PASSWORD_INVALID_RULE = 'Senha invalida. Use ao menos 8 caracteres, com letras e numeros.',
+  SESSION_EXPIRED = 'Sua sessao expirou. Faca login novamente para continuar.',
+  PASSWORD_CHANGE_MANAGED_BY_SUPABASE = 'Fluxo de troca de senha e gerenciado pelo Supabase.'
+}

@@ -1,10 +1,13 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { Observable, from, of } from 'rxjs';
+import { map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
+import { isFeatureOn } from '../constants/feature-flags';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 export interface ManagedUser {
-  id: number;
+  id: string | number;
   username: string;
   email: string;
   fullName: string;
@@ -26,30 +29,121 @@ export interface PagedUsersResponse {
 })
 export class UserManagementService {
   private adminApiUrl = `${environment.apiUrl}/admin/users`;
+  private supabase: SupabaseClient;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient) {
+    this.supabase = createClient(environment.supabase.url, environment.supabase.anonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    });
+  }
 
   getAllUsers(page: number, size: number): Observable<PagedUsersResponse> {
+    if (!isFeatureOn('videoOn')) {
+      return of({
+        content: [],
+        totalElements: 0,
+        totalPages: 0,
+        size,
+        number: page
+      });
+    }
+
     return this.http.get<PagedUsersResponse>(`${this.adminApiUrl}?page=${page}&size=${size}`);
   }
 
   getPendingUsers(): Observable<ManagedUser[]> {
-    return this.http.get<ManagedUser[]>(`${this.adminApiUrl}/pending`);
+    return from(this.supabase.functions.invoke('retrieve-pending-user', {
+      body: {}
+    })).pipe(
+      map(({ data, error }) => {
+        if (error) {
+          throw error;
+        }
+
+        const list = Array.isArray(data) ? data : [];
+        return list.map((item: any) => ({
+          id: item?.id ?? item?.user_id ?? item?.userId,
+          username: item?.username ?? item?.user_name ?? item?.email ?? '',
+          email: item?.email ?? '',
+          fullName: item?.fullName ?? item?.nome_completo ?? item?.name ?? item?.username ?? '',
+          role: this.normalizeRole(item?.role ?? item?.user_role),
+          active: item?.active ?? false,
+          passwordExpiresAt: item?.passwordExpiresAt ?? item?.password_expires_at ?? null
+        }));
+      })
+    );
   }
 
-  approveUser(userId: number): Observable<ManagedUser> {
+  private normalizeRole(role: unknown): ManagedUser['role'] {
+    const normalized = String(role || 'STUDENT').toUpperCase();
+    if (normalized === 'ADMIN' || normalized === 'ADMINISTRADOR') {
+      return 'ADMIN';
+    }
+
+    if (normalized === 'TEACHER' || normalized === 'PROFESSOR') {
+      return 'TEACHER';
+    }
+
+    return 'STUDENT';
+  }
+
+  approveUser(userId: string | number): Observable<ManagedUser> {
+    if (!isFeatureOn('videoOn')) {
+      return of({
+        id: userId,
+        username: 'feature-disabled',
+        email: 'feature-disabled@example.com',
+        fullName: 'Feature disabled',
+        role: 'STUDENT',
+        active: false,
+        passwordExpiresAt: null
+      });
+    }
+
     return this.http.post<ManagedUser>(`${this.adminApiUrl}/${userId}/approve`, {});
   }
 
-  rejectUser(userId: number): Observable<{ message: string }> {
+  rejectUser(userId: string | number): Observable<{ message: string }> {
+    if (!isFeatureOn('videoOn')) {
+      return of({ message: 'Feature disabled' });
+    }
+
     return this.http.delete<{ message: string }>(`${this.adminApiUrl}/${userId}/reject`);
   }
 
-  updateUserRole(userId: number, role: 'TEACHER' | 'STUDENT'): Observable<ManagedUser> {
+  updateUserRole(userId: string | number, role: 'TEACHER' | 'STUDENT'): Observable<ManagedUser> {
+    if (!isFeatureOn('videoOn')) {
+      return of({
+        id: userId,
+        username: 'feature-disabled',
+        email: 'feature-disabled@example.com',
+        fullName: 'Feature disabled',
+        role,
+        active: false,
+        passwordExpiresAt: null
+      });
+    }
+
     return this.http.put<ManagedUser>(`${this.adminApiUrl}/${userId}/role`, { role });
   }
 
-  expireUserPassword(userId: number): Observable<ManagedUser> {
+  expireUserPassword(userId: string | number): Observable<ManagedUser> {
+    if (!isFeatureOn('videoOn')) {
+      return of({
+        id: userId,
+        username: 'feature-disabled',
+        email: 'feature-disabled@example.com',
+        fullName: 'Feature disabled',
+        role: 'STUDENT',
+        active: false,
+        passwordExpiresAt: new Date().toISOString()
+      });
+    }
+
     return this.http.post<ManagedUser>(`${this.adminApiUrl}/${userId}/password/expire`, {});
   }
 }

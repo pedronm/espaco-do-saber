@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 from workers import Response, WorkerEntrypoint
 
 def _json(data, status=200):
-    return Response.new(
+    return Response(
         json.dumps(data),
         headers={"content-type": "application/json"},
         status=status,

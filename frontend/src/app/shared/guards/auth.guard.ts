@@ -14,6 +14,16 @@ export class AuthGuard implements CanActivate {
   canActivate(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): Observable<boolean> {
     return this.authService.currentUser.pipe(
       map((currentUser) => {
+        const guestOnly = route.data['guestOnly'] === true;
+        if (guestOnly) {
+          if (!currentUser) {
+            return true;
+          }
+
+          this.router.navigate([this.getDashboardRoute(currentUser.roles || [])]);
+          return false;
+        }
+
         if (!currentUser) {
           this.authService.loginWithRedirect();
           return false;
@@ -38,5 +48,19 @@ export class AuthGuard implements CanActivate {
         return true;
       })
     );
+  }
+
+  private getDashboardRoute(roles: string[]): string {
+    const normalizedRoles = roles.map((role) => role.toLowerCase());
+
+    if (normalizedRoles.includes('administrador')) {
+      return '/administrador';
+    }
+
+    if (normalizedRoles.includes('professor')) {
+      return '/professor';
+    }
+
+    return '/aluno';
   }
 }

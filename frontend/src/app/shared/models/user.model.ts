@@ -3,7 +3,7 @@ export interface User {
   username: string;
   email: string;
   fullName: string;
-  role: 'ADMIN' | 'TEACHER' | 'STUDENT';
+  role: 'administrador' | 'professor' | 'aluno' | 'visitante';
 }
 
 export interface LoginRequest {
@@ -17,7 +17,7 @@ export interface RegisterRequest {
   password: string;
   confirmPassword: string;
   fullName: string;
-  accessType: 'PUBLICO' | 'ALUNO';
+  accessType: 'visitante' | 'aluno';
 }
 
 export interface ChangePasswordRequest {
@@ -43,5 +43,6 @@ export interface AuthResponse {
   username?: string;
   email?: string;
   roles?: string[];
+  permissions?: string[];
   passwordChangeRequired?: boolean;
 }

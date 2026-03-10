@@ -1,5 +1,9 @@
 import { Component } from '@angular/core';
 import { AuthService } from '../../shared/services/auth.service';
+import { Router } from '@angular/router';
+import { LoginRequest } from '../../shared/models/user.model';
+import { HealthcheckService, ServiceHealth } from '../../shared/services/healthcheck.service';
+import { FormMessage } from '../../shared/constants/form-messages';
 
 @Component({
   standalone: false,
@@ -8,8 +12,32 @@ import { AuthService } from '../../shared/services/auth.service';
     <div class="login-container">
       <div class="login-card">
         <h2>Entrar - Espaço do Saber</h2>
-        <p class="register-link">Autenticação centralizada via Auth0.</p>
-        <button type="button" class="btn-primary" (click)="onSubmit()">Entrar</button>
+
+        <form (ngSubmit)="onSubmit()">
+          <div class="form-group">
+            <label for="username">Usuário ou e-mail</label>
+            <input id="username" type="text" name="username" [(ngModel)]="credentials.username" required>
+          </div>
+
+          <div class="form-group">
+            <label for="password">Senha</label>
+            <input id="password" type="password" name="password" [(ngModel)]="credentials.password" required>
+          </div>
+
+          <button type="submit" class="btn-primary" [disabled]="loading">
+            {{ loading ? 'Entrando...' : 'Entrar' }}
+          </button>
+        </form>
+
+        <p class="error" *ngIf="error">{{ error }}</p>
+
+        <div class="health-box" *ngIf="healthStatus.length > 0">
+          <p class="health-title">Status dos workers</p>
+          <p class="health-item" *ngFor="let item of healthStatus" [class.offline]="!item.ok">
+            {{ item.service }}: {{ item.ok ? 'disponivel' : 'indisponivel' }} ({{ item.status }})
+          </p>
+        </div>
+
         <button type="button" class="btn-secondary" (click)="loginWithSignupHint()">Criar conta</button>
       </div>
     </div>
@@ -105,16 +133,88 @@ import { AuthService } from '../../shared/services/auth.service';
       font-size: 1rem;
       cursor: pointer;
     }
+    .health-box {
+      margin-top: 1rem;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 0.75rem;
+      background: #fafafa;
+      text-align: left;
+    }
+    .health-title {
+      margin: 0 0 0.5rem;
+      font-weight: 600;
+      color: #333;
+      font-size: 0.9rem;
+    }
+    .health-item {
+      margin: 0.25rem 0;
+      color: #2e7d32;
+      font-size: 0.85rem;
+    }
+    .health-item.offline {
+      color: #c62828;
+    }
   `]
 })
 export class LoginComponent {
-  constructor(private authService: AuthService) {}
+  credentials: LoginRequest = {
+    username: '',
+    password: ''
+  };
+  loading = false;
+  error = '';
+  healthStatus: ServiceHealth[] = [];
+
+  constructor(
+    private authService: AuthService,
+    private router: Router,
+    private healthcheckService: HealthcheckService
+  ) {
+    this.healthcheckService.checkWorkers().subscribe((status) => {
+      this.healthStatus = status;
+    });
+  }
 
   onSubmit(): void {
-    this.authService.loginWithRedirect(false);
+    this.error = '';
+
+    if (!this.credentials.username?.trim() || !this.credentials.password?.trim()) {
+      this.error = FormMessage.LOGIN_FILL_REQUIRED;
+      return;
+    }
+
+    this.loading = true;
+
+    this.authService.login(this.credentials).subscribe({
+      next: (session) => {
+        this.loading = false;
+        const role = session.roles?.[0] || 'aluno';
+        const targetRoute = role === 'administrador' ? '/administrador' : role === 'professor' ? '/professor' : role === 'visitante' ? '/aluno' : '/aluno';
+        this.router.navigate([targetRoute]);
+      },
+      error: (err) => {
+        this.loading = false;
+        this.error = this.extractLoginErrorMessage(err);
+      }
+    });
   }
 
   loginWithSignupHint(): void {
-    this.authService.loginWithRedirect(true);
+    this.router.navigate(['/register']);
+  }
+
+  private extractLoginErrorMessage(error: any): string {
+    const apiMessage = (error?.message || '').toString().toLowerCase();
+
+    if (!apiMessage) {
+      return FormMessage.LOGIN_FAILED;
+    }
+
+    if (apiMessage.includes('usuario/e-mail') || apiMessage.includes('senha') || apiMessage.includes('conexao') || apiMessage.includes('confirmado')) {
+      return error.message;
+    }
+
+    return FormMessage.LOGIN_FAILED_CHECK_DATA;
   }
 }
