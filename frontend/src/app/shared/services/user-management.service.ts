@@ -33,6 +33,11 @@ export class UserManagementService {
 
   constructor(private http: HttpClient) {
     this.supabase = createClient(environment.supabase.url, environment.supabase.anonKey, {
+      global: {
+        headers: {
+          apikey: environment.supabase.anonKey
+        }
+      },
       auth: {
         persistSession: true,
         autoRefreshToken: true,

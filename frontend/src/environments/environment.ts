@@ -18,9 +18,4 @@ export const environment = {
     r2On: false,
     healthchecksOn: true
   },
-  supabase: {
-    url: 'https://rdpjwbyvkopgmhabdmwj.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJkcGp3Ynl2a29wZ21oYWJkbXdqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4OTg0NjAsImV4cCI6MjA4ODQ3NDQ2MH0.wrNbWSqgJruz7TgMVUUcP9MPbIwnciFAVGVKsxsFUdE',
-    rolesClaim: 'user_role'
-  }
 };

@@ -28,7 +28,7 @@ const routes: Routes = [
     path: 'aluno', 
     component: StudentDashboardComponent,
     canActivate: [AuthGuard],
-    data: { roles: ['aluno', 'visitante', 'administrador', 'professor'] }
+    data: { roles: ['aluno', 'medium', 'administrador', 'professor'] }
   },
   { 
     path: 'administrador', 
@@ -40,10 +40,10 @@ const routes: Routes = [
     path: 'videos', 
     component: StudentDashboardComponent,
     canActivate: [AuthGuard],
-    data: { roles: ['aluno', 'visitante', 'administrador', 'professor'] }
+    data: { roles: ['aluno', 'medium', 'administrador', 'professor'] }
   },
   {
-    path: 'visitante',
+    path: 'medium',
     redirectTo: '/aluno',
     pathMatch: 'full'
   },

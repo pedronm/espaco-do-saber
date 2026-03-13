@@ -25,17 +25,6 @@ import { FormMessage } from '../../shared/constants/form-messages';
           </div>
 
           <div class="form-group">
-            <label for="username">Usuário</label>
-            <input
-              id="username"
-              type="text"
-              name="username"
-              [(ngModel)]="registerData.username"
-              required
-            >
-          </div>
-
-          <div class="form-group">
             <label for="email">E-mail</label>
             <input
               id="email"
@@ -98,7 +87,7 @@ import { FormMessage } from '../../shared/constants/form-messages';
               [(ngModel)]="registerData.accessType"
             >
               <option value="aluno">Aluno</option>
-              <option value="visitante">Público</option>
+              <option value="medium">Mediuns</option>
             </select>
           </div>
 
@@ -228,12 +217,11 @@ import { FormMessage } from '../../shared/constants/form-messages';
 })
 export class RegisterComponent {
   registerData: RegisterRequest = {
-    username: '',
     email: '',
     password: '',
     confirmPassword: '',
     fullName: '',
-    accessType: 'visitante'
+    accessType: 'medium'
   };
 
   loading = false;
@@ -247,11 +235,6 @@ export class RegisterComponent {
   onSubmit(): void {
     this.error = '';
     this.success = '';
-
-    if (!this.registerData.username || !this.registerData.email || !this.registerData.password || !this.registerData.confirmPassword || !this.registerData.fullName) {
-      this.error = FormMessage.REGISTER_REQUIRED_FIELDS;
-      return;
-    }
 
     if (this.registerData.password !== this.registerData.confirmPassword) {
       this.error = FormMessage.REGISTER_PASSWORD_MISMATCH;

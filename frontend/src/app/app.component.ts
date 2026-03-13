@@ -176,8 +176,7 @@ export class AppComponent implements OnInit, OnDestroy {
   getDashboardRoute(): string {
     const user = this.authService.currentUserValue;
     if (!user) return '/login';
-    console.log(`User Logged In: ${user.roles}`);
-    let route = '/aluno';
+    let route = '/login';
     user.roles?.forEach( role => {
       switch (role) {
         case 'administrador':
@@ -187,7 +186,7 @@ export class AppComponent implements OnInit, OnDestroy {
           route ='/professor';
           break;
         case 'aluno':
-        case 'visitante':
+        case 'medium':
           route ='/aluno';
           break;
       }

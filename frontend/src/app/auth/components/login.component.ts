@@ -31,12 +31,12 @@ import { FormMessage } from '../../shared/constants/form-messages';
 
         <p class="error" *ngIf="error">{{ error }}</p>
 
-        <div class="health-box" *ngIf="healthStatus.length > 0">
+        <!-- <div class="health-box" *ngIf="healthStatus.length > 0">
           <p class="health-title">Status dos workers</p>
           <p class="health-item" *ngFor="let item of healthStatus" [class.offline]="!item.ok">
             {{ item.service }}: {{ item.ok ? 'disponivel' : 'indisponivel' }} ({{ item.status }})
           </p>
-        </div>
+        </div> -->
 
         <button type="button" class="btn-secondary" (click)="loginWithSignupHint()">Criar conta</button>
       </div>
@@ -189,8 +189,13 @@ export class LoginComponent {
     this.authService.login(this.credentials).subscribe({
       next: (session) => {
         this.loading = false;
-        const role = session.roles?.[0] || 'aluno';
-        const targetRoute = role === 'administrador' ? '/administrador' : role === 'professor' ? '/professor' : role === 'visitante' ? '/aluno' : '/aluno';
+        const targetRoute = this.resolveRouteFromRoles(session.roles || []);
+        if (!targetRoute) {
+          this.error = FormMessage.LOGIN_FAILED_CHECK_DATA;
+          this.authService.logout();
+          return;
+        }
+
         this.router.navigate([targetRoute]);
       },
       error: (err) => {
@@ -202,6 +207,24 @@ export class LoginComponent {
 
   loginWithSignupHint(): void {
     this.router.navigate(['/register']);
+  }
+
+  private resolveRouteFromRoles(roles: string[]): string | null {
+    const normalizedRoles = roles.map((role) => role.toLowerCase());
+
+    if (normalizedRoles.includes('administrador')) {
+      return '/administrador';
+    }
+
+    if (normalizedRoles.includes('professor')) {
+      return '/professor';
+    }
+
+    if (normalizedRoles.includes('aluno') || normalizedRoles.includes('medium')) {
+      return '/aluno';
+    }
+
+    return null;
   }
 
   private extractLoginErrorMessage(error: any): string {

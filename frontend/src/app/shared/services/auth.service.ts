@@ -18,6 +18,11 @@ export class AuthService {
 
   constructor(private http: HttpClient, private router: Router) {
     this.supabase = createClient(environment.supabase.url, environment.supabase.anonKey, {
+      global: {
+        headers: {
+          apikey: environment.supabase.anonKey
+        }
+      },
       auth: {
         persistSession: true,
         autoRefreshToken: true,
@@ -70,25 +75,11 @@ export class AuthService {
   }
 
   register(request: RegisterRequest): Observable<RegisterResponse> {
-    return from(this.supabase.functions.invoke('private-data-register', {
-      body: {
-        senha: request.password,
-        nome_completo: request.fullName,
-        email: request.email,
-        username: request.username,
-        role: request.accessType ?? 'visitante'
-      }
-    })).pipe(
-      map(({ data, error }) => {
-        if (error) {
-          throw new Error(this.toFriendlyAuthMessage(error, FormMessage.REGISTER_FAILED));
-        }
-
-        return {
-          message: this.toFriendlyRegisterMessage(data?.message),
-          pendingApproval: data?.pendingApproval ?? true
-        } as RegisterResponse;
-      })
+    return from(this.createAccountWithProfile(request)).pipe(
+      map((result) => ({
+        message: this.toFriendlyRegisterMessage(result?.message),
+        pendingApproval: result?.pendingApproval ?? true
+      } as RegisterResponse))
     );
   }
 
@@ -125,7 +116,8 @@ export class AuthService {
   }
 
   isAuthenticated(): boolean {
-    return !!this.currentUserValue;
+    const user = this.currentUserValue;
+    return !!user?.access_token && Array.isArray(user.roles) && user.roles.length > 0;
   }
 
   hasRole(role: string): boolean {
@@ -190,7 +182,7 @@ export class AuthService {
   }
 
   private buildUserSession(user: any, accessToken?: string): AuthResponse | null {
-    if (!user) {
+    if (!user || !accessToken) {
       return null;
     }
 
@@ -207,13 +199,15 @@ export class AuthService {
       this.extractRolesFromPath(user, 'app_metadata.user_permissions')
     );
     const permissions = this.normalizeStringArray(permissionsSource);
-    const normalizedRoles = roles.length > 0 ? roles : ['aluno'];
+    if (roles.length === 0) {
+      return null;
+    }
 
     return {
       access_token: accessToken,
       username: user?.nickname || user?.name || user?.email,
       email: user?.email,
-      roles: normalizedRoles,
+      roles,
       permissions
     };
   }
@@ -249,7 +243,9 @@ export class AuthService {
       administrador: 'administrador',
       professor: 'professor',
       aluno: 'aluno',
-      visitante: 'visitante'
+      visitante: 'medium',
+      medium: 'medium',
+      mediuns: 'medium'
     };
 
     return raw
@@ -275,6 +271,74 @@ export class AuthService {
 
   private setCurrentUser(user: AuthResponse | null): void {
     this.currentUserSubject.next(user);
+  }
+
+  private async createAccountWithProfile(request: RegisterRequest): Promise<{ message?: string; pendingApproval: boolean }> {
+    const role = (request.accessType || 'medium').toLowerCase();
+    const normalizedRole = role === 'visitante' || role === 'mediuns' ? 'medium' : role;
+
+    try {
+      const { data: signUpData, error: signUpError } = await this.supabase.auth.signUp({
+        email: request.email,
+        password: request.password,
+        options: {
+          data: {
+            nome_completo: request.fullName
+          }
+        }
+      });
+
+      if (signUpError || !signUpData.user?.id) {
+        throw new Error(this.toFriendlyAuthMessage(signUpError, FormMessage.REGISTER_FAILED));
+      }
+
+      const userId = signUpData.user.id;
+      const profilePayload = {
+        user_id: userId,
+        nome_completo: request.fullName,
+        email: request.email,
+        is_pendente_aprovacao: true,
+        avatar_url: null
+      };
+
+      const { data: profileData, error: profileError } = await this.supabase
+        .from('profiles')
+        .upsert(profilePayload, { onConflict: 'user_id' })
+        .select('id')
+        .single();
+
+      if (profileError) {
+        throw new Error(this.toFriendlyAuthMessage(profileError, FormMessage.REGISTER_FAILED));
+      }
+
+      const userRolePayload = {
+        user_id: userId,
+        role: normalizedRole,
+        id: profileData?.id ?? undefined
+      };
+
+      const { error: roleError } = await this.supabase
+        .from('user_roles')
+        .upsert(userRolePayload, { onConflict: 'user_id' });
+
+      if (roleError) {
+        throw new Error(this.toFriendlyAuthMessage(roleError, FormMessage.REGISTER_FAILED));
+      }
+
+      return {
+        message: FormMessage.REGISTER_SUCCESS_PENDING,
+        pendingApproval: true
+      };
+    } catch (error) {
+      await this.supabase.auth.signOut();
+      this.currentUserSubject.next(null);
+
+      if (error instanceof Error) {
+        throw error;
+      }
+
+      throw new Error(this.toFriendlyAuthMessage(error, FormMessage.REGISTER_FAILED));
+    }
   }
 
   private toFriendlyRegisterMessage(rawMessage: unknown): string {
@@ -312,6 +376,10 @@ export class AuthService {
 
     if (raw.includes('network') || raw.includes('failed to fetch') || raw.includes('fetch')) {
       return FormMessage.NETWORK_FAILED;
+    }
+
+    if (raw.includes('no api key found in request') || raw.includes('apikey')) {
+      return FormMessage.REGISTER_CONNECTIVITY_RETRY;
     }
 
     if (raw.includes('already registered') || raw.includes('already exists') || raw.includes('duplicate')) {

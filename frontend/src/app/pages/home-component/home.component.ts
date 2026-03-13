@@ -22,7 +22,7 @@ export class HomeComponent {
   }
 
   get isStudent(): boolean {
-    return this.authService.hasRole('aluno') || this.authService.hasRole('visitante');
+    return this.authService.hasRole('aluno') || this.authService.hasRole('medium');
   }
 
 }

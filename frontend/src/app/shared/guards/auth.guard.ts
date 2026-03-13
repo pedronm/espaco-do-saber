@@ -14,17 +14,20 @@ export class AuthGuard implements CanActivate {
   canActivate(route: ActivatedRouteSnapshot, state: RouterStateSnapshot): Observable<boolean> {
     return this.authService.currentUser.pipe(
       map((currentUser) => {
+        const isAuthenticated = this.authService.isAuthenticated();
+        const normalizedRoles = (currentUser?.roles || []).map((role) => role.toLowerCase());
         const guestOnly = route.data['guestOnly'] === true;
+
         if (guestOnly) {
-          if (!currentUser) {
+          if (!isAuthenticated) {
             return true;
           }
 
-          this.router.navigate([this.getDashboardRoute(currentUser.roles || [])]);
+          this.router.navigate([this.getDashboardRoute(normalizedRoles)]);
           return false;
         }
 
-        if (!currentUser) {
+        if (!isAuthenticated) {
           this.authService.loginWithRedirect();
           return false;
         }
@@ -32,13 +35,13 @@ export class AuthGuard implements CanActivate {
         const requiredRole = route.data['role'];
         const requiredRoles = route.data['roles'] as string[] | undefined;
 
-        if (requiredRole && currentUser.roles?.indexOf(requiredRole) === -1) {
+        if (requiredRole && !normalizedRoles.includes(String(requiredRole).toLowerCase())) {
           this.router.navigate(['/']);
           return false;
         }
 
         if (requiredRoles && requiredRoles.length > 0) {
-          const hasAnyRole = requiredRoles.some(role => currentUser.roles?.includes(role));
+          const hasAnyRole = requiredRoles.some((role) => normalizedRoles.includes(String(role).toLowerCase()));
           if (!hasAnyRole) {
             this.router.navigate(['/']);
             return false;
@@ -61,6 +64,10 @@ export class AuthGuard implements CanActivate {
       return '/professor';
     }
 
-    return '/aluno';
+    if (normalizedRoles.includes('aluno') || normalizedRoles.includes('medium')) {
+      return '/aluno';
+    }
+
+    return '/login';
   }
 }
