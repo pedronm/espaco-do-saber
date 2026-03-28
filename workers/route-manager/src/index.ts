@@ -4,23 +4,17 @@
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
-        // Get the path and query string from the original request
     const url = new URL(request.url);
-    const pathAndQuery = url.pathname + url.search; // e.g., "/api/users?page=2"
 
-    // Build a new URL for the service binding.
-    // You can use any origin – the target Worker will receive this full URL.
-    const targetUrl = `http://frontend-worker/${pathAndQuery}`;
-
-    // Create a new request to forward
-    const newRequest = new Request(targetUrl, {
+    // Create a new request to forward to the FRONTEND_WORKER service binding
+    const newRequest = new Request(url.toString(), {
       method: request.method,
       headers: request.headers,
       body: request.body,
     });
 
-    // Forward the request via the service binding
-    return env.FRONTEND_WORKER.fetch(newRequest);
+    // Use service binding to fetch from FRONTEND_WORKER
+    return await env.FRONTEND_WORKER.fetch(newRequest);
   },
 } satisfies ExportedHandler<Env>;
 
