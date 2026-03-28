@@ -21,7 +21,7 @@ export const environment = {
   },
   supabase: {
     url: 'url-teste',
-    anonKey: 'chave-este',
+    publishableKey: 'chave-este',
     rolesClaim: 'role-teste'
   }
 };

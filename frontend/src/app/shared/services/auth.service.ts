@@ -23,10 +23,10 @@ export class AuthService {
   private supabase: SupabaseClient;
 
   constructor(private http: HttpClient, private router: Router) {
-    this.supabase = createClient(environment.supabase.url, environment.supabase.anonKey, {
+    this.supabase = createClient(environment.supabase.url, environment.supabase.publishableKey, {
       global: {
         headers: {
-          apikey: environment.supabase.anonKey
+          apikey: environment.supabase.publishableKey
         }
       },
       auth: {

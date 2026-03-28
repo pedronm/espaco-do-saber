@@ -32,10 +32,10 @@ export class UserManagementService {
   private supabase: SupabaseClient;
 
   constructor(private http: HttpClient) {
-    this.supabase = createClient(environment.supabase.url, environment.supabase.anonKey, {
+    this.supabase = createClient(environment.supabase.url, environment.supabase.publishableKey, {
       global: {
         headers: {
-          apikey: environment.supabase.anonKey
+          apikey: environment.supabase.publishableKey
         }
       },
       auth: {

@@ -3,41 +3,24 @@
 // Do not manually define Env — it drifts from your actual bindings.
 
 export default {
-  async fetch(request: Request): Promise<Response> {
+  async fetch(request: Request, env: Env): Promise<Response> {
+        // Get the path and query string from the original request
     const url = new URL(request.url);
+    const pathAndQuery = url.pathname + url.search; // e.g., "/api/users?page=2"
 
-    // Pass static asset requests through to the external origin unmodified.
-    // Match files with extensions, but exclude .html files (which are routes in SPA).
-    if (url.pathname.match(/\.\w+$/) && !url.pathname.endsWith(".html")) {
-      return fetch(new Request(`${env.SPA_ORIGIN}${url.pathname}`, request));
-    }
+    // Build a new URL for the service binding.
+    // You can use any origin – the target Worker will receive this full URL.
+    const targetUrl = `http://frontend-worker/${pathAndQuery}`;
 
-    // Start fetching bootstrap data immediately — do not await yet.
-    // This allows parallel fetching with the shell.
-    const dataPromise = fetchBootstrapData(env, url.pathname, request.headers);
+    // Create a new request to forward
+    const newRequest = new Request(targetUrl, {
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+    });
 
-    // Fetch the SPA shell from the external origin.
-    // SPA routers serve index.html for all routes.
-    const shell = await fetch(`${env.SPA_ORIGIN}/index.html`);
-
-    if (!shell.ok) {
-      return new Response("Origin returned an error", { status: 502 });
-    }
-
-    // Use HTMLRewriter to stream the shell and inject data into <body>.
-    return new HTMLRewriter()
-      .on("body", {
-        async element(el) {
-          const data = await dataPromise;
-          if (data) {
-            el.prepend(
-              `<script>window.__BOOTSTRAP_DATA__=${JSON.stringify(data)}</script>`,
-              { html: true },
-            );
-          }
-        },
-      })
-      .transform(shell);
+    // Forward the request via the service binding
+    return env.FRONTEND_WORKER.fetch(newRequest);
   },
 } satisfies ExportedHandler<Env>;
 
