@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Observable, from, of } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
-import { isFeatureOn } from '../constants/feature-flags';
+import { isFeatureAdminAdmissionOn } from '../constants/feature-flags';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 export interface ManagedUser {
@@ -47,7 +47,7 @@ export class UserManagementService {
   }
 
   getAllUsers(page: number, size: number): Observable<PagedUsersResponse> {
-    if (!isFeatureOn('videoOn')) {
+    if (!isFeatureAdminAdmissionOn()) {
       return of({
         content: [],
         totalElements: 0,
@@ -61,6 +61,10 @@ export class UserManagementService {
   }
 
   getPendingUsers(): Observable<ManagedUser[]> {
+    if (!isFeatureAdminAdmissionOn()) {
+      return of([]);
+    }
+
     return from(this.supabase.functions.invoke('retrieve-pending-user', {
       body: {}
     })).pipe(
@@ -97,7 +101,7 @@ export class UserManagementService {
   }
 
   approveUser(userId: string | number): Observable<ManagedUser> {
-    if (!isFeatureOn('videoOn')) {
+    if (!isFeatureAdminAdmissionOn()) {
       return of({
         id: userId,
         username: 'feature-disabled',
@@ -113,7 +117,7 @@ export class UserManagementService {
   }
 
   rejectUser(userId: string | number): Observable<{ message: string }> {
-    if (!isFeatureOn('videoOn')) {
+    if (!isFeatureAdminAdmissionOn()) {
       return of({ message: 'Feature disabled' });
     }
 
@@ -121,7 +125,7 @@ export class UserManagementService {
   }
 
   updateUserRole(userId: string | number, role: 'TEACHER' | 'STUDENT'): Observable<ManagedUser> {
-    if (!isFeatureOn('videoOn')) {
+    if (!isFeatureAdminAdmissionOn()) {
       return of({
         id: userId,
         username: 'feature-disabled',
@@ -137,7 +141,7 @@ export class UserManagementService {
   }
 
   expireUserPassword(userId: string | number): Observable<ManagedUser> {
-    if (!isFeatureOn('videoOn')) {
+    if (!isFeatureAdminAdmissionOn()) {
       return of({
         id: userId,
         username: 'feature-disabled',

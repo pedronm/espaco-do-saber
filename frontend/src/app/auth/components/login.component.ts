@@ -15,8 +15,8 @@ import { FormMessage } from '../../shared/constants/form-messages';
 
         <form (ngSubmit)="onSubmit()">
           <div class="form-group">
-            <label for="username">Usuário ou e-mail</label>
-            <input id="username" type="text" name="username" [(ngModel)]="credentials.username" required>
+            <label for="email">E-mail</label>
+            <input id="email" type="email" name="email" [(ngModel)]="credentials.email" required>
           </div>
 
           <div class="form-group">
@@ -28,6 +28,10 @@ import { FormMessage } from '../../shared/constants/form-messages';
             {{ loading ? 'Entrando...' : 'Entrar' }}
           </button>
         </form>
+
+        <div class="forgot-password">
+          <a routerLink="/recuperar-senha">Esqueceu sua senha?</a>
+        </div>
 
         <p class="error" *ngIf="error">{{ error }}</p>
 
@@ -92,6 +96,18 @@ import { FormMessage } from '../../shared/constants/form-messages';
     }
     .btn-primary:hover {
       background: #1565c0;
+    }
+    .forgot-password {
+      text-align: center;
+      margin-top: 1rem;
+    }
+    .forgot-password a {
+      color: #1976d2;
+      text-decoration: none;
+      font-size: 0.9rem;
+    }
+    .forgot-password a:hover {
+      text-decoration: underline;
     }
     .error {
       color: #f44336;
@@ -159,7 +175,7 @@ import { FormMessage } from '../../shared/constants/form-messages';
 })
 export class LoginComponent {
   credentials: LoginRequest = {
-    username: '',
+    email: '',
     password: ''
   };
   loading = false;
@@ -179,7 +195,7 @@ export class LoginComponent {
   onSubmit(): void {
     this.error = '';
 
-    if (!this.credentials.username?.trim() || !this.credentials.password?.trim()) {
+    if (!this.credentials.email?.trim() || !this.credentials.password?.trim()) {
       this.error = FormMessage.LOGIN_FILL_REQUIRED;
       return;
     }
@@ -206,7 +222,7 @@ export class LoginComponent {
   }
 
   loginWithSignupHint(): void {
-    this.router.navigate(['/register']);
+    this.router.navigate(['/cadastro']);
   }
 
   private resolveRouteFromRoles(roles: string[]): string | null {
@@ -234,7 +250,7 @@ export class LoginComponent {
       return FormMessage.LOGIN_FAILED;
     }
 
-    if (apiMessage.includes('usuario/e-mail') || apiMessage.includes('senha') || apiMessage.includes('conexao') || apiMessage.includes('confirmado')) {
+    if (apiMessage.includes('e-mail') || apiMessage.includes('senha') || apiMessage.includes('conexao') || apiMessage.includes('confirmado')) {
       return error.message;
     }
 

@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, from, of, throwError } from 'rxjs';
-import { map, switchMap, take, tap } from 'rxjs/operators';
+import { BehaviorSubject, Observable, from, of, Subject } from 'rxjs';
+import { map, switchMap, tap } from 'rxjs/operators';
 import { AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest, RegisterResponse } from '../models/user.model';
 import { environment } from '../../../environments/environment';
 import { HttpClient } from '@angular/common/http';
@@ -8,12 +8,18 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Router } from '@angular/router';
 import { FormMessage } from '../constants/form-messages';
 
+export type AuthEvent = 'PASSWORD_RECOVERY' | 'SIGNED_IN' | 'SIGNED_OUT' | 'USER_UPDATED' | 'TOKEN_REFRESHED' | 'MFA_CHALLENGE_VERIFIED' | null;
+
 @Injectable({
   providedIn: 'root'
 })
 export class AuthService {
   private currentUserSubject: BehaviorSubject<AuthResponse | null>;
   public currentUser: Observable<AuthResponse | null>;
+  
+  private authEventSubject: BehaviorSubject<AuthEvent>;
+  public authEvent: Observable<AuthEvent>;
+  
   private supabase: SupabaseClient;
 
   constructor(private http: HttpClient, private router: Router) {
@@ -32,13 +38,25 @@ export class AuthService {
 
     this.currentUserSubject = new BehaviorSubject<AuthResponse | null>(null);
     this.currentUser = this.currentUserSubject.asObservable();
+    
+    this.authEventSubject = new BehaviorSubject<AuthEvent>(null);
+    this.authEvent = this.authEventSubject.asObservable();
 
-    this.supabase.auth.onAuthStateChange((_event, session) => {
-      this.currentUserSubject.next(this.buildUserSession(session?.user ?? null, session?.access_token));
+    // Listen for Supabase auth events
+    this.supabase.auth.onAuthStateChange((event, session) => {
+      console.log(`[AuthService] Auth event: ${event}`);
+      
+      // Emit auth event for components to listen
+      if (event === 'PASSWORD_RECOVERY' || event === 'USER_UPDATED') {
+        this.authEventSubject.next(event as AuthEvent);
+      }
+      
+      // Hydrate user session
+      void this.hydrateSession(session?.user ?? null, session?.access_token);
     });
 
     this.supabase.auth.getSession().then(({ data }) => {
-      this.currentUserSubject.next(this.buildUserSession(data.session?.user ?? null, data.session?.access_token));
+      void this.hydrateSession(data.session?.user ?? null, data.session?.access_token);
     });
   }
 
@@ -46,32 +64,66 @@ export class AuthService {
     return this.currentUserSubject.value;
   }
 
+  /**
+   * Initialize auth from URL (processes recovery tokens, magic links, etc.)
+   * Call this when your app loads or when navigating to auth-related routes
+   */
+  public async initializeFromUrl(): Promise<void> {
+    console.log('[AuthService] Initializing auth from URL...');
+    try {
+      await this.supabase.auth.initialize();
+      console.log('[AuthService] Auth initialization complete');
+    } catch (error) {
+      console.error('[AuthService] Auth initialization error:', error);
+    }
+  }
+
+  /**
+   * Get the current session
+   */
+  public async getSession(): Promise<any> {
+    try {
+      const { data, error } = await this.supabase.auth.getSession();
+      if (error) throw error;
+      return data.session;
+    } catch (error) {
+      console.error('[AuthService] Error getting session:', error);
+      return null;
+    }
+  }
+
   login(credentials: LoginRequest): Observable<AuthResponse> {
-    return from(this.supabase.functions.invoke('username-login', {
-      body: {
-        email: credentials.username,
-        password: credentials.password
-      }
+    return from(this.supabase.auth.signInWithPassword({
+      email: credentials.email,
+      password: credentials.password
     })).pipe(
-      switchMap(({ data, error }) => {
+      switchMap(async ({ data, error }) => {
         if (error || !data.session) {
           const message = this.toFriendlyAuthMessage(
             error,
             FormMessage.LOGIN_FAILED_FALLBACK
           );
-          return throwError(() => new Error(message));
+          throw new Error(message);
         }
 
         const session = this.buildUserSession(data.session.user, data.session.access_token);
+        if (!session) {
+          await this.supabase.auth.signOut();
+          this.setCurrentUser(null);
+          throw new Error(FormMessage.LOGIN_FAILED_CHECK_DATA);
+        }
+
+        const isPendingApproval = await this.hasPendingApproval(session.access_token || '');
+        if (isPendingApproval) {
+          await this.supabase.auth.signOut();
+          this.setCurrentUser(null);
+          throw new Error(FormMessage.LOGIN_PENDING_APPROVAL);
+        }
+
         this.setCurrentUser(session);
-        return this.currentUser.pipe(take(1), map((user) => user as AuthResponse));
+        return session;
       })
     );
-
-    // const {error} = await this.supabase.auth.setSession({
-    //   access_token: data.access_token, 
-    //   refresh_token: data.refresh_token
-    // })
   }
 
   register(request: RegisterRequest): Observable<RegisterResponse> {
@@ -103,6 +155,20 @@ export class AuthService {
 
   changePassword(request: ChangePasswordRequest): Observable<{ message: string }> {
     return of({ message: FormMessage.PASSWORD_CHANGE_MANAGED_BY_SUPABASE });
+  }
+
+  requestPasswordReset(email: string): Observable<{ error: any }> {
+    return from(this.supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-senha`,
+    })).pipe(
+      map(({ error }) => ({ error }))
+    );
+  }
+
+  updatePassword(password: string): Observable<{ error: any }> {
+    return from(this.supabase.auth.updateUser({ password })).pipe(
+      map(({ error }) => ({ error }))
+    );
   }
 
   logout(): void {
@@ -169,7 +235,7 @@ export class AuthService {
 
   loginWithRedirect(signUp = false): void {
     if (signUp) {
-      this.router.navigate(['/register']);
+      this.router.navigate(['/cadastro']);
       return;
     }
 
@@ -273,61 +339,67 @@ export class AuthService {
     this.currentUserSubject.next(user);
   }
 
-  private async createAccountWithProfile(request: RegisterRequest): Promise<{ message?: string; pendingApproval: boolean }> {
-    const role = (request.accessType || 'medium').toLowerCase();
-    const normalizedRole = role === 'visitante' || role === 'mediuns' ? 'medium' : role;
+  private async hydrateSession(user: any, accessToken?: string): Promise<void> {
+    const session = this.buildUserSession(user, accessToken);
+    if (!session) {
+      this.setCurrentUser(null);
+      return;
+    }
+
+    const isPendingApproval = await this.hasPendingApproval(session.access_token || '');
+    if (isPendingApproval) {
+      await this.supabase.auth.signOut();
+      this.setCurrentUser(null);
+      return;
+    }
+
+    this.setCurrentUser(session);
+  }
+
+  private async hasPendingApproval(accessToken: string): Promise<boolean> {
+    if (!accessToken) {
+      return false;
+    }
 
     try {
-      const { data: signUpData, error: signUpError } = await this.supabase.auth.signUp({
-        email: request.email,
-        password: request.password,
-        options: {
-          data: {
-            nome_completo: request.fullName
-          }
+      const response = await fetch(`${environment.apiUrl}/me`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${accessToken}`
         }
       });
 
-      if (signUpError || !signUpData.user?.id) {
-        throw new Error(this.toFriendlyAuthMessage(signUpError, FormMessage.REGISTER_FAILED));
+      if (response.status !== 403) {
+        return false;
       }
 
-      const userId = signUpData.user.id;
-      const profilePayload = {
-        user_id: userId,
-        nome_completo: request.fullName,
-        email: request.email,
-        is_pendente_aprovacao: true,
-        avatar_url: null
-      };
+      const payload = await response.json().catch(() => ({}));
+      const code = String(payload?.code || '').toUpperCase();
+      const message = String(payload?.message || '').toLowerCase();
+      return code === 'PENDING_APPROVAL' || message.includes('pendente');
+    } catch {
+      return false;
+    }
+  }
 
-      const { data: profileData, error: profileError } = await this.supabase
-        .from('profiles')
-        .upsert(profilePayload, { onConflict: 'user_id' })
-        .select('id')
-        .single();
+  private async createAccountWithProfile(request: RegisterRequest): Promise<{ message?: string; pendingApproval: boolean }> {
+    try {
+      const { data, error } = await this.supabase.functions.invoke('private-data-register', {
+        body: {
+          email: request.email,
+          senha: request.password,
+          nome_completo: request.fullName,
+          role: this.normalizeRegisterAccessType(request.accessType)
+        }
+      });
 
-      if (profileError) {
-        throw new Error(this.toFriendlyAuthMessage(profileError, FormMessage.REGISTER_FAILED));
-      }
-
-      const userRolePayload = {
-        user_id: userId,
-        role: normalizedRole,
-        id: profileData?.id ?? undefined
-      };
-
-      const { error: roleError } = await this.supabase
-        .from('user_roles')
-        .upsert(userRolePayload, { onConflict: 'user_id' });
-
-      if (roleError) {
-        throw new Error(this.toFriendlyAuthMessage(roleError, FormMessage.REGISTER_FAILED));
+      if (error) {
+        throw new Error(this.toFriendlyAuthMessage(error, FormMessage.REGISTER_FAILED));
       }
 
       return {
-        message: FormMessage.REGISTER_SUCCESS_PENDING,
-        pendingApproval: true
+        message: this.toFriendlyRegisterMessage(data?.message),
+        pendingApproval: data?.pendingApproval ?? true
       };
     } catch (error) {
       await this.supabase.auth.signOut();
@@ -354,6 +426,15 @@ export class AuthService {
     return rawMessage;
   }
 
+  private normalizeRegisterAccessType(accessType: RegisterRequest['accessType'] | string | undefined): 'aluno' | 'medium' {
+    const normalized = String(accessType || '').trim().toLowerCase();
+    if (normalized === 'medium') {
+      return 'medium';
+    }
+
+    return 'aluno';
+  }
+
   private toFriendlyAuthMessage(error: unknown, fallback: string): string {
     const status = this.extractErrorStatus(error);
     if (status === 409) {
@@ -372,6 +453,10 @@ export class AuthService {
 
     if (raw.includes('email not confirmed')) {
       return FormMessage.EMAIL_NOT_CONFIRMED;
+    }
+
+    if (raw.includes('pending_approval') || raw.includes('pendente de aprovacao') || raw.includes('pending approval')) {
+      return FormMessage.LOGIN_PENDING_APPROVAL;
     }
 
     if (raw.includes('network') || raw.includes('failed to fetch') || raw.includes('fetch')) {

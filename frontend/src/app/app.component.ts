@@ -10,6 +10,10 @@ import { Subscription, filter } from 'rxjs';
   selector: 'app-root',
   template: `
     <div class="app-container">
+      <div class="loading-overlay" *ngIf="isLoading">
+        <div class="spinner"></div>
+        <p>Carregando...</p>
+      </div>
       <nav class="navbar" *ngIf="isAuthenticated">
         <div class="nav-brand">
           <img [src]="logoPath" [alt]="logoAlt" class="logo">
@@ -19,10 +23,14 @@ import { Subscription, filter } from 'rxjs';
           <a [routerLink]="getDashboardRoute()" routerLinkActive="active">Quadro de aulas</a>
           <a *ngIf="isTeacher || isAdmin" [routerLink]="['/professor']" routerLinkActive="active">Minhas gravações</a>
           <a [routerLink]="['/videos']" routerLinkActive="active">Videos</a>
+          <div class="user-card" *ngIf="loggedUserName">
+            <span class="user-name">{{ loggedUserName }}</span>
+            <span class="user-role">{{ loggedUserRole }}</span>
+          </div>
           <button (click)="logout()" class="btn-logout">Sair</button>
         </div>
       </nav>
-      <main class="main-content">
+      <main class="main-content" [class.no-padding]="!isAuthenticated">
         <div class="live-toast" *ngIf="liveToastMessage">{{ liveToastMessage }}</div>
         <router-outlet></router-outlet>
       </main>
@@ -32,6 +40,36 @@ import { Subscription, filter } from 'rxjs';
     .app-container {
       min-height: 100vh;
       background: #f5f5f5;
+    }
+    .loading-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 9999;
+    }
+    .spinner {
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #1976d2;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin-bottom: 1rem;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+    .loading-overlay p {
+      color: white;
+      font-size: 1.1rem;
     }
     .navbar {
       background: #1976d2;
@@ -63,6 +101,28 @@ import { Subscription, filter } from 'rxjs';
       gap: 1rem;
       align-items: center;
     }
+    .user-card {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      padding: 0.4rem 0.75rem;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.16);
+      border: 1px solid rgba(255,255,255,0.28);
+      min-width: 130px;
+    }
+    .user-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      line-height: 1.1;
+    }
+    .user-role {
+      font-size: 0.75rem;
+      text-transform: capitalize;
+      opacity: 0.9;
+      line-height: 1.1;
+      margin-top: 0.15rem;
+    }
     .nav-links a {
       color: white;
       text-decoration: none;
@@ -88,6 +148,9 @@ import { Subscription, filter } from 'rxjs';
     .main-content {
       padding: 2rem;
     }
+    .main-content.no-padding {
+      padding: 0;
+    }
     .live-toast {
       background: #fff3cd;
       color: #856404;
@@ -103,6 +166,7 @@ export class AppComponent implements OnInit, OnDestroy {
   logoPath = environment.appLogo;
   logoAlt = 'Espaço do Saber Logo';
   liveToastMessage: string = '';
+  isLoading = false;
 
   private liveNotificationSubscription?: Subscription;
   private authSubscription?: Subscription;
@@ -113,33 +177,80 @@ export class AppComponent implements OnInit, OnDestroy {
     private authService: AuthService,
     private router: Router,
     private liveStreamPresenceService: LiveStreamPresenceService
-  ) {}
+  ) {
+    console.log('%c[AppComponent] Constructor invoked', 'color: #1976d2; font-weight: bold;');
+    console.log('[AppComponent] Router initialized:', !!this.router);
+    console.log('[AppComponent] AuthService initialized:', !!this.authService);
+  }
 
   ngOnInit(): void {
+    const initialPath = this.router.url.split('?')[0].split('#')[0];
+    if (window.location.hash) {
+      const hashPreview = window.location.hash.substring(0, 80);
+      console.log('[AppComponent] Hash preview:', hashPreview + '...');
+    }
     this.authSubscription = this.authService.currentUser.subscribe((user) => {
+      
       if (user) {
+        console.log('[AppComponent] User authenticated:', user.email);
         this.liveStreamPresenceService.startWatching();
+        this.isLoading = false;
         return;
       }
 
+      console.log('\n%c[AppComponent] NO USER AUTHENTICATED - REDIRECT CHECK STARTING:', 'color: #f44336; font-weight: bold;');
       this.liveStreamPresenceService.stopWatching();
       this.liveToastMessage = '';
 
-      const currentPath = this.router.url.split('?')[0];
-      if (currentPath !== '/login' && currentPath !== '/register') {
-        this.router.navigate(['/login']);
+      const currentPath = this.router.url.split('?')[0].split('#')[0];
+      const publicPaths = ['/login', '/cadastro', '/recuperar-senha', '/reset-senha', '/link-invalido', '/404'];
+ 
+      // Only auto-redirect to login if not already on a public path
+      if (!publicPaths.includes(currentPath)) {
+        console.log('%c[AppComponent] ➡️ REDIRECTING TO /login from path:', 'color: #f44336; font-weight: bold;', currentPath);
+        console.log('  REASON: Path not in public paths array');
+        this.isLoading = true;
+        this.router.navigate(['/login']).then(success => {
+          console.log('  Navigation result:', success ? 'SUCCESS' : 'FAILED');
+        });
+      } else {
+        console.log('%c[AppComponent] ✓ STAYING on public path:', 'color: #4caf50; font-weight: bold;', currentPath);
+        if (currentPath === '/reset-senha') {
+          console.log('  REASON: On recovery route, should show ResetPasswordComponent');
+        }
+        this.isLoading = false;
       }
     });
 
+    console.log('[AppComponent] Setting up router navigation events...');
     this.routerSubscription = this.router.events.pipe(
       filter((event): event is NavigationEnd => event instanceof NavigationEnd)
-    ).subscribe(() => {
-      const currentPath = this.router.url.split('?')[0];
-      if ((currentPath === '/login' || currentPath === '/register') && this.authService.isAuthenticated()) {
+    ).subscribe((event) => {
+      console.log('[AppComponent] Navigation event:', event.url);
+      const currentPath = this.router.url.split('?')[0].split('#')[0];
+      const guestPaths = ['/login', '/cadastro', '/recuperar-senha'];
+      if (guestPaths.includes(currentPath) && this.authService.isAuthenticated()) {
+        console.log('[AppComponent] Redirecting authenticated user from', currentPath);
         this.router.navigate([this.getDashboardRoute()]);
+      }
+
+      // 1. Detect Supabase errors in the hash (which should already be processed by handleAuthTokensFromRoute)
+      const hash = window.location.hash;
+      if (hash.includes('error=access_denied') && 
+          (hash.includes('otp_expired') || hash.includes('expired'))) {
+        console.log('[AppComponent] Expired token detected, redirecting to invalid-link');
+        this.router.navigate(['/link-invalido']);
+      }
+
+      // 2. Check for any stored auth errors from route processing
+      const storedError = sessionStorage.getItem('authError');
+      if (storedError && currentPath !== '/link-invalido') {
+        console.log('[AppComponent] Stored auth error detected:', storedError);
+        this.router.navigate(['/link-invalido']);
       }
     });
 
+    console.log('[AppComponent] Setting up live stream notifications...');
     this.liveNotificationSubscription = this.liveStreamPresenceService.onNewStream().subscribe((streamId) => {
       this.liveToastMessage = `Nova transmissão ao vivo iniciada: ${streamId}`;
       if (this.toastTimeout) {
@@ -149,6 +260,8 @@ export class AppComponent implements OnInit, OnDestroy {
         this.liveToastMessage = '';
       }, 6000);
     });
+    
+    console.log('%c[AppComponent] ngOnInit completed successfully!', 'color: #4caf50; font-weight: bold;');
   }
 
   ngOnDestroy(): void {
@@ -194,6 +307,20 @@ export class AppComponent implements OnInit, OnDestroy {
     return route;
   }
 
+  get loggedUserName(): string {
+    return this.authService.currentUserValue?.username || this.authService.currentUserValue?.email || '';
+  }
+
+  get loggedUserRole(): string {
+    const primaryRole = this.authService.currentUserValue?.roles?.[0] || '';
+    return primaryRole || 'sem perfil';
+  }
+
+  /**
+   * Handle auth handlers from Supabase via query parameters (passed through route-manager)
+   * These come from /auth-callback which converts them to query params
+   * Benefits: Server-side loggable, route-manager can intercept, no hash fragment issues
+   */
   logout(): void {
     this.authService.logout();
     this.router.navigate(['/login']);

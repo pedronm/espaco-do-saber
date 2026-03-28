@@ -1,10 +1,11 @@
 import { environment } from '../../../environments/environment';
 
-type FeatureName = 'videoOn' | 'streamOn' | 'muxOn' | 'r2On' | 'healthchecksOn';
+type FeatureName = 'videoOn' | 'streamOn' | 'muxOn' | 'r2On' | 'healthchecksOn' | 'adminAdmissionOn';
 
 export function isFeatureOn(featureName: FeatureName): boolean {
   const features = environment.features || {};
-  if (features.globalOn === false) {
+  // Admin approval can be toggled independently from the global media feature gate.
+  if (features.globalOn === false && featureName !== 'adminAdmissionOn') {
     return false;
   }
 
@@ -29,4 +30,8 @@ export function isFeatureR2On(): boolean {
 
 export function isFeatureHealthchecksOn(): boolean {
   return isFeatureOn('healthchecksOn');
+}
+
+export function isFeatureAdminAdmissionOn(): boolean {
+  return isFeatureOn('adminAdmissionOn');
 }

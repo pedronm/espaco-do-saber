@@ -240,7 +240,7 @@ export class TeacherDashboardComponent implements OnInit, OnDestroy {
     this.liveSubscription?.unsubscribe();
   }
   watchLive(liveId: string): void {
-    this.router.navigate(['/video/live', liveId]);
+    this.router.navigate(['/videos/ao-vivo', liveId]);
   }
 
   regenerateStreamKey(): void {

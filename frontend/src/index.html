@@ -19,8 +19,42 @@
   <meta name="twitter:title" content="Espaço do Saber - CPMA">
   <meta name="twitter:description" content="Plataforma de cursos e streaming da CPMA.">
   <meta name="twitter:image" content="https://espacodosaber.cpmacursos.com/assets/logo-espaco-saber.png">
+
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+    }
+    noscript {
+      display: block;
+      padding: 2rem;
+      background: #fff3e0;
+      color: #e65100;
+      border: 1px solid #ffb74d;
+      border-radius: 4px;
+      margin: 1rem;
+      font-size: 1rem;
+    }
+    noscript h2 {
+      margin-top: 0;
+      color: #e65100;
+    }
+  </style>
 </head>
 <body>
+  <noscript>
+    <h2>JavaScript desabilitado</h2>
+    <p>Esta aplicação requer JavaScript para funcionar. Por favor, ative o JavaScript no seu navegador.</p>
+  </noscript>
+  
+  <script>
+    console.log('[PAGE] index.html loaded and parsed');
+    console.log('[PAGE] URL:', window.location.href);
+    console.log('[PAGE] Hash:', window.location.hash);
+  </script>
+  
   <app-root></app-root>
 </body>
 </html>

@@ -183,6 +183,14 @@ app.use('/api/*', async (c, next) => {
       raw: payload
     });
 
+    const isPendingApproval = await readIsPendingApproval(c.env.NEON_DATABASE_URL, String(payload.sub || ''));
+    if (isPendingApproval) {
+      return c.json({
+        code: 'PENDING_APPROVAL',
+        message: 'Cadastro pendente de aprovacao do administrador.'
+      }, 403);
+    }
+
     await next();
   } catch (error) {
     console.warn(JSON.stringify({
@@ -652,4 +660,31 @@ function toManagedUserRole(rawRole: string): 'ADMIN' | 'TEACHER' | 'STUDENT' {
   }
 
   return 'STUDENT';
+}
+
+async function readIsPendingApproval(databaseUrl: string, userId: string): Promise<boolean> {
+  if (!userId) {
+    return false;
+  }
+
+  try {
+    const sql = neon(databaseUrl);
+    const rows = await sql`
+      select coalesce(is_pendente_aprovacao, false) as "isPendingApproval"
+      from profiles
+      where user_id = ${userId}
+      limit 1
+    `;
+
+    return ((rows as Array<{ isPendingApproval?: boolean }>)?.[0]?.isPendingApproval ?? false) === true;
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: 'error',
+      event: 'auth.pending-approval.lookup.failed',
+      userId,
+      message: error instanceof Error ? error.message : String(error)
+    }));
+
+    return false;
+  }
 }

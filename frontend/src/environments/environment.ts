@@ -16,6 +16,12 @@ export const environment = {
     streamOn: false,
     muxOn: false,
     r2On: false,
-    healthchecksOn: true
+    healthchecksOn: true,
+    adminAdmissionOn: true
   },
+  supabase: {
+    url: 'url-teste',
+    anonKey: 'chave-este',
+    rolesClaim: 'role-teste'
+  }
 };

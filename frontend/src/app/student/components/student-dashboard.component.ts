@@ -170,7 +170,7 @@ export class StudentDashboardComponent implements OnInit, OnDestroy {
   onVideoSelected(video: Video): void {
     const liveId = this.extractLiveIdFromStreamingUrl(video.streamingUrl);
     if (video.isLive && liveId) {
-      this.router.navigate(['/video/live', liveId]);
+      this.router.navigate(['/videos/ao-vivo', liveId]);
       return;
     }
 
@@ -184,7 +184,7 @@ export class StudentDashboardComponent implements OnInit, OnDestroy {
   }
 
   watchLive(liveId: string): void {
-    this.router.navigate(['/video/live', liveId]);
+    this.router.navigate(['/videos/ao-vivo', liveId]);
   }
 
   getStreamUrl(id: number): string {

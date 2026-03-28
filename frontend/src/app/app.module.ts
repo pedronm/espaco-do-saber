@@ -7,6 +7,10 @@ import { AppRoutingModule } from './app-routing.module';
 import { AppComponent } from './app.component';
 import { LoginComponent } from './auth/components/login.component';
 import { RegisterComponent } from './auth/components/register.component';
+import { RequestPasswordResetComponent } from './auth/components/request-password-reset.component';
+import { ResetPasswordComponent } from './auth/components/reset-password.component';
+import { InvalidLinkComponent } from './auth/components/invalid-link.component';
+import { NotFoundComponent } from './auth/components/not-found.component';
 import { TeacherDashboardComponent } from './teacher/components/teacher-dashboard.component';
 import { StudentDashboardComponent } from './student/components/student-dashboard.component';
 import { AdminDashboardComponent } from './admin/components/admin-dashboard.component';
@@ -20,6 +24,10 @@ import { CommonModule } from '@angular/common';
     AppComponent,
     LoginComponent,
     RegisterComponent,
+    RequestPasswordResetComponent,
+    ResetPasswordComponent,
+    InvalidLinkComponent,
+    NotFoundComponent,
     TeacherDashboardComponent,
     StudentDashboardComponent,
     AdminDashboardComponent,

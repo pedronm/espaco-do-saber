@@ -1,0 +1,16 @@
+{
+  "name": "route-manager",
+  "version": "1.0.0",
+  "description": "Route manager for Espaco do Saber",
+  "main": "src/index.ts",
+  "scripts": {
+    "deploy": "npx wrangler deploy",
+    "dev": "npx wrangler dev",
+    "start": "npx wrangler dev"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240000.0",
+    "typescript": "^5.0.0",
+    "wrangler": "^3.0.0"
+  }
+}

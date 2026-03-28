@@ -7,7 +7,8 @@
     "build": "ng build",
     "build:prod:cloudflare": "ng build --configuration production --output-path=dist/cloudflare/browser",
     "deploy:paviment:cloudflare": "npx wrangler deploy dist/cloudflare/browser --name=fe-espaco-do-saber",
-    "deploy:cloudflare": "npx wrangler deploy",
+    "deploy:with-build:cloudflare": "npm run build:prod:cloudflare && npx wrangler deploy",
+    "deploy": "npx wrangler deploy",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
   },
