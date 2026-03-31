@@ -1,0 +1,27 @@
+name = "route-manager"
+main = "src/index.ts"
+compatibility_date = "2026-03-26"
+
+
+[[services]]
+binding = "FRONTEND_WORKER"
+service = "YOUR_SERVICE_NAME"
+
+[[services]]
+binding = "API_WORKER"
+service = "YOUR_SERVICE_NAME"
+
+[observability]
+enabled = false
+head_sampling_rate = 1
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
+persist = true
+head_sampling_rate = 1

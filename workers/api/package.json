@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
+    "@supabase/supabase-js": "^2.39.8",
     "hono": "^4.6.10",
     "jose": "^5.9.6"
   },

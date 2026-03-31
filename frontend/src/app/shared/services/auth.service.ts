@@ -1,10 +1,11 @@
 import { Injectable } from '@angular/core';
 import { BehaviorSubject, Observable, from, of, Subject } from 'rxjs';
-import { map, switchMap, tap } from 'rxjs/operators';
+import { map, switchMap, tap, catchError } from 'rxjs/operators';
 import { AuthResponse, ChangePasswordRequest, LoginRequest, RegisterRequest, RegisterResponse } from '../models/user.model';
 import { environment } from '../../../environments/environment';
 import { HttpClient } from '@angular/common/http';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { corsHeaders } from '@supabase/supabase-js/cors'
 import { Router } from '@angular/router';
 import { FormMessage } from '../constants/form-messages';
 
@@ -23,18 +24,7 @@ export class AuthService {
   private supabase: SupabaseClient;
 
   constructor(private http: HttpClient, private router: Router) {
-    this.supabase = createClient(environment.supabase.url, environment.supabase.publishableKey, {
-      global: {
-        headers: {
-          apikey: environment.supabase.publishableKey
-        }
-      },
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
-      }
-    });
+    this.supabase = createClient(environment.supabase.url, environment.supabase.publishableKey);
 
     this.currentUserSubject = new BehaviorSubject<AuthResponse | null>(null);
     this.currentUser = this.currentUserSubject.asObservable();
@@ -71,7 +61,17 @@ export class AuthService {
   public async initializeFromUrl(): Promise<void> {
     console.log('[AuthService] Initializing auth from URL...');
     try {
+      // This processes hash tokens from Supabase
       await this.supabase.auth.initialize();
+      
+      // Check if we're in a password recovery flow
+      const { data } = await this.supabase.auth.getSession();
+      if (data.session?.user) {
+        console.log('[AuthService] Session found from URL');
+        const event = (data.session as any).recovery_token ? 'PASSWORD_RECOVERY' : 'SIGNED_IN';
+        this.authEventSubject.next(event as AuthEvent);
+      }
+      
       console.log('[AuthService] Auth initialization complete');
     } catch (error) {
       console.error('[AuthService] Auth initialization error:', error);
@@ -114,6 +114,7 @@ export class AuthService {
         }
 
         const isPendingApproval = await this.hasPendingApproval(session.access_token || '');
+        console.log('DEBUG: isPendingApproval =', isPendingApproval, 'for user', session.email);
         if (isPendingApproval) {
           await this.supabase.auth.signOut();
           this.setCurrentUser(null);
@@ -166,8 +167,74 @@ export class AuthService {
   }
 
   updatePassword(password: string): Observable<{ error: any }> {
-    return from(this.supabase.auth.updateUser({ password })).pipe(
-      map(({ error }) => ({ error }))
+    // Get the current access token for the recovery session
+    const accessToken = this.getToken();
+    
+    if (!accessToken) {
+      return of({ 
+        error: { 
+          message: 'No recovery session found. Please check your email for the recovery link.' 
+        } 
+      });
+    }
+
+    console.log('[AuthService] Updating password via backend API proxy...');
+
+    // Call backend API instead of Supabase directly to avoid CORS issues
+    // The backend will use the recovery token to update the password
+    return this.http.post<{ error?: any }>(`${environment.apiUrl}/auth/reset-password`, {
+      password
+    }, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'application/json'
+      }
+    }).pipe(
+      map(response => {
+        if (response.error) {
+          console.error('[AuthService] Backend password update failed:', response.error);
+          return { 
+            error: { 
+              message: response.error.message || 'Erro ao atualizar senha. Tente novamente.' 
+            } 
+          };
+        }
+        console.log('[AuthService] Password updated successfully via backend');
+        
+        // IMPORTANT: Clear the auto-generated recovery session immediately
+        // Supabase auto-creates a session when recovery token is processed,
+        // but we want user to explicitly log in with new password
+        console.log('[AuthService] Clearing auto-generated recovery session...');
+        this.supabase.auth.signOut().catch(err => {
+          console.warn('[AuthService] Error clearing session (non-critical):', err);
+        });
+        
+        return { error: null };
+      }),
+      // Fallback: if API call fails, try direct Supabase update (pre-Cloudflare fallback)
+      catchError((err: any) => {
+        console.warn('[AuthService] Backend API call failed, trying direct Supabase update:', err.message);
+        return from(this.supabase.auth.updateUser({ password })).pipe(
+          map(({ error }: any) => {
+            if (!error) {
+              // Clear session here too for direct Supabase flow
+              console.log('[AuthService] Clearing auto-generated recovery session (Supabase direct)...');
+              this.supabase.auth.signOut().catch((err: any) => {
+                console.warn('[AuthService] Error clearing session (non-critical):', err);
+              });
+            }
+            return { error };
+          }),
+          catchError((supabaseErr: any) => {
+            console.error('[AuthService] Both backend and Supabase failed:', supabaseErr);
+            return of({ 
+              error: { 
+                message: 'Erro ao atualizar senha. Por favor, verifique sua conexão e tente novamente.' 
+              } 
+            });
+          })
+        );
+      })
     );
   }
 
@@ -340,14 +407,31 @@ export class AuthService {
   }
 
   private async hydrateSession(user: any, accessToken?: string): Promise<void> {
+    // During password recovery, Supabase provides a user but without full claims
+    // We should NOT require roles during recovery - let the component handle it
     const session = this.buildUserSession(user, accessToken);
+    
     if (!session) {
+      // No valid session, but check if we're in a recovery flow
+      // Recovery tokens come from email links and don't have full claims
+      if (user && accessToken) {
+        console.log('[AuthService] Token present but no complete session - might be recovery token');
+        const jwtClaims = this.decodeJwtPayload(accessToken);
+        
+        // If the token has recovery_token claim or no roles, it's likely a recovery flow
+        if ((jwtClaims as any).recovery_token || !(jwtClaims as any).user_role) {
+          console.log('[AuthService] Detected recovery token - allowing access to password reset');
+          this.authEventSubject.next('PASSWORD_RECOVERY');
+        }
+      }
+      
       this.setCurrentUser(null);
       return;
     }
 
     const isPendingApproval = await this.hasPendingApproval(session.access_token || '');
     if (isPendingApproval) {
+      console.log('[AuthService] User pending approval - signing out');
       await this.supabase.auth.signOut();
       this.setCurrentUser(null);
       return;
@@ -369,21 +453,23 @@ export class AuthService {
         }
       });
 
-      if (response.status !== 403) {
+      if (!response.ok) {
+        console.warn('DEBUG: /api/me failed with status', response.status);
         return false;
       }
 
       const payload = await response.json().catch(() => ({}));
-      const code = String(payload?.code || '').toUpperCase();
-      const message = String(payload?.message || '').toLowerCase();
-      return code === 'PENDING_APPROVAL' || message.includes('pendente');
-    } catch {
+      console.log('DEBUG: /api/me response:', payload);
+      return payload?.isPendingApproval === true;
+    } catch (error) {
+      console.error('DEBUG: /api/me exception:', error);
       return false;
     }
   }
 
   private async createAccountWithProfile(request: RegisterRequest): Promise<{ message?: string; pendingApproval: boolean }> {
     try {
+
       const { data, error } = await this.supabase.functions.invoke('private-data-register', {
         body: {
           email: request.email,

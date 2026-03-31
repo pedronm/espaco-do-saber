@@ -1,0 +1,16 @@
+name = "espaco-do-saber-video-processing"
+main = "src/worker.py"
+compatibility_flags = [
+  "python_workers"
+]
+compatibility_date = "2026-03-05"
+
+[[r2_buckets]]
+binding = "VIDEOS_BUCKET"
+bucket_name = "YOUR_BUCKET_NAME"
+
+[vars]
+APP_ENV = "production"
+
+[observability]
+enabled = true

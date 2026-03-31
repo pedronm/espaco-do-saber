@@ -14,7 +14,7 @@ import { Subscription, filter } from 'rxjs';
         <div class="spinner"></div>
         <p>Carregando...</p>
       </div>
-      <nav class="navbar" *ngIf="isAuthenticated">
+      <nav class="navbar" *ngIf="isAuthenticated && !isInRecoveryMode">
         <div class="nav-brand">
           <img [src]="logoPath" [alt]="logoAlt" class="logo">
           <h1>Espaço do Saber</h1>
@@ -167,6 +167,7 @@ export class AppComponent implements OnInit, OnDestroy {
   logoAlt = 'Espaço do Saber Logo';
   liveToastMessage: string = '';
   isLoading = false;
+  isInRecoveryMode = false;  // Track if user is in password recovery flow
 
   private liveNotificationSubscription?: Subscription;
   private authSubscription?: Subscription;
@@ -189,6 +190,38 @@ export class AppComponent implements OnInit, OnDestroy {
       const hashPreview = window.location.hash.substring(0, 80);
       console.log('[AppComponent] Hash preview:', hashPreview + '...');
     }
+
+    /**
+     * CRITICAL: Check for error recovery links FIRST (before auth subscription fires)
+     * If the recovery link is expired/invalid, show error page immediately
+     */
+    const hash = window.location.hash;
+    
+    // Detect Supabase error responses in recovery flow
+    const hasAuthError = hash.includes('error=') && (
+      hash.includes('error_code=') ||
+      hash.includes('error_description=')
+    );
+    
+    if (hasAuthError) {
+      console.log('%c[AppComponent] ⚠️ EARLY ERROR DETECTION: Auth error in recovery link', 'color: #f44336; font-weight: bold;');
+      
+      // Parse error details for logging
+      if (hash.includes('error_code=otp_expired') || hash.includes('otp_expired')) {
+        console.log('  Error Type: Expired recovery link (OTP expired)');
+      } else if (hash.includes('error_code=')) {
+        const errorMatch = hash.match(/error_code=([^&]+)/);
+        if (errorMatch) {
+          console.log('  Error Type:', decodeURIComponent(errorMatch[1]));
+        }
+      }
+      
+      console.log('  Action: Redirecting to /link-invalido');
+      this.isLoading = false;
+      this.router.navigate(['/link-invalido']);
+      return;  // Exit early - don't set up auth subscription
+    }
+
     this.authSubscription = this.authService.currentUser.subscribe((user) => {
       
       if (user) {
@@ -202,22 +235,42 @@ export class AppComponent implements OnInit, OnDestroy {
       this.liveStreamPresenceService.stopWatching();
       this.liveToastMessage = '';
 
-      const currentPath = this.router.url.split('?')[0].split('#')[0];
-      const publicPaths = ['/login', '/cadastro', '/recuperar-senha', '/reset-senha', '/link-invalido', '/404'];
+      // Use window.location.pathname as more reliable source than router.url
+      const currentPath = window.location.pathname;
+      
+      /**
+       * PUBLIC ROUTES - Accessible without authentication
+       * Must align with route-manager PUBLIC_ROUTES
+       */
+      const publicPaths = [
+        '/login',            // Login page
+        '/cadastro',         // Registration page
+        '/recuperar-senha',  // Request password reset
+        '/reset-senha',      // Password reset form (only needs hash token)
+        '/link-invalido',    // Invalid/expired recovery link page
+      ];
  
-      // Only auto-redirect to login if not already on a public path
+      // Only auto-redirect to login if not on a public path
       if (!publicPaths.includes(currentPath)) {
         console.log('%c[AppComponent] ➡️ REDIRECTING TO /login from path:', 'color: #f44336; font-weight: bold;', currentPath);
-        console.log('  REASON: Path not in public paths array');
+        console.log('  REASON: Path not in public routes array');
         this.isLoading = true;
         this.router.navigate(['/login']).then(success => {
           console.log('  Navigation result:', success ? 'SUCCESS' : 'FAILED');
         });
       } else {
         console.log('%c[AppComponent] ✓ STAYING on public path:', 'color: #4caf50; font-weight: bold;', currentPath);
+        
+        // Log which recovery route and what we're waiting for
         if (currentPath === '/reset-senha') {
-          console.log('  REASON: On recovery route, should show ResetPasswordComponent');
+          const hasHash = window.location.hash.includes('access_token') || 
+                         window.location.hash.includes('error');
+          console.log('  Status: Recovery route - waiting for Supabase to process hash token');
+          console.log('  Has recovery token in hash:', hasHash);
+        } else if (currentPath === '/link-invalido') {
+          console.log('  Status: Error page - user will see invalid link message');
         }
+        
         this.isLoading = false;
       }
     });
@@ -227,22 +280,25 @@ export class AppComponent implements OnInit, OnDestroy {
       filter((event): event is NavigationEnd => event instanceof NavigationEnd)
     ).subscribe((event) => {
       console.log('[AppComponent] Navigation event:', event.url);
-      const currentPath = this.router.url.split('?')[0].split('#')[0];
-      const guestPaths = ['/login', '/cadastro', '/recuperar-senha'];
-      if (guestPaths.includes(currentPath) && this.authService.isAuthenticated()) {
-        console.log('[AppComponent] Redirecting authenticated user from', currentPath);
+      const currentPath = window.location.pathname;
+      
+      // Track if we're in recovery mode (password reset flow)
+      this.isInRecoveryMode = currentPath === '/reset-senha' || currentPath === '/link-invalido';
+      
+      /**
+       * Guest-only routes - if user is authenticated, redirect to dashboard
+       * These are login/registration/password recovery pages
+       */
+      const guestOnlyPaths = ['/login', '/cadastro', '/recuperar-senha'];
+      
+      if (guestOnlyPaths.includes(currentPath) && this.authService.isAuthenticated()) {
+        console.log('[AppComponent] Redirecting authenticated user from guest-only page:', currentPath);
+        console.log('  Destination:', this.getDashboardRoute());
         this.router.navigate([this.getDashboardRoute()]);
+        return;
       }
 
-      // 1. Detect Supabase errors in the hash (which should already be processed by handleAuthTokensFromRoute)
-      const hash = window.location.hash;
-      if (hash.includes('error=access_denied') && 
-          (hash.includes('otp_expired') || hash.includes('expired'))) {
-        console.log('[AppComponent] Expired token detected, redirecting to invalid-link');
-        this.router.navigate(['/link-invalido']);
-      }
-
-      // 2. Check for any stored auth errors from route processing
+      // Check for any stored auth errors from route processing
       const storedError = sessionStorage.getItem('authError');
       if (storedError && currentPath !== '/link-invalido') {
         console.log('[AppComponent] Stored auth error detected:', storedError);

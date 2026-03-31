@@ -1,0 +1,50 @@
+
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "espaco-do-saber-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-03-05",
+	"routes": [
+		{
+			"pattern": "YOUR_API_ROUTE_PATTERN",
+			"zone_name": "YOUR_ZONE_NAME"
+		}
+	],
+	"vars": {
+		"APP_ENV": "production",
+		"FRONTEND_ORIGIN": "YOUR_FRONTEND",
+		"SUPABASE_URL": "YOUR_SUPABASE_URL",
+		"SUPABASE_JWT_AUDIENCE": "authenticated",
+		"SUPABASE_JWT_ISSUER": "YOUR_SUPABASE_JWT_ISSUER",
+		"SUPABASE_SERVICE_KEY": "YOUR_SUPABASE_SERVICE_KEY",
+		"AUTH_ROLES_CLAIM": "user_role",
+		"MUX_TOKEN_ID": "YOUR_MUX_TOKEN_ID"
+	},
+	"r2_buckets": [
+		{
+			"binding": "VIDEOS_BUCKET",
+			"bucket_name": "YOUR_R2_BUCKET_NAME"
+		}
+	],
+	"services": [
+		{
+			"binding": "VIDEO_PROCESSING",
+			"service": "YOUR_VIDEO_PROCESSING_SERVICE_NAME"
+		}
+	],
+	"observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  }
+}

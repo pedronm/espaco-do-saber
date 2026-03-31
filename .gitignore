@@ -6,7 +6,8 @@ frontend/.angular/
 # Configuration files with sensitive data
 *.prod.*
 *.production.*
-wrangler.*
+wrangler.toml
+wrangler.jsonc
 
 
 

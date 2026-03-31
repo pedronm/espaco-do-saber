@@ -87,7 +87,7 @@ import { FormMessage } from '../../shared/constants/form-messages';
               [(ngModel)]="registerData.accessType"
             >
               <option value="aluno">Aluno</option>
-              <option value="medium">Mediuns</option>
+              <option value="medium">Medium</option>
             </select>
           </div>
 
@@ -151,18 +151,26 @@ import { FormMessage } from '../../shared/constants/form-messages';
     .toggle-password {
       position: absolute;
       top: 50%;
-      right: 0.4rem;
+      right: 0.5rem;
       transform: translateY(-50%);
       border: none;
       background: transparent;
       color: #1976d2;
-      font-size: 0.8rem;
+      font-size: 0.85rem;
       cursor: pointer;
-      padding: 0.2rem 0.35rem;
+      padding: 0.5rem 0.75rem;
       border-radius: 4px;
+      z-index: 10;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      white-space: nowrap;
     }
     .toggle-password:hover {
       background: #eef5ff;
+      color: #0d47a1;
+    }
+    .toggle-password:active {
+      transform: translateY(-50%) scale(0.95);
     }
     .checkbox-group label {
       display: flex;
