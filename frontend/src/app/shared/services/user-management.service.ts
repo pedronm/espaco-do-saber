@@ -11,7 +11,7 @@ export interface ManagedUser {
   username: string;
   email: string;
   fullName: string;
-  role: 'ADMIN' | 'TEACHER' | 'STUDENT';
+  role: 'administrador' | 'professor' | 'aluno' | 'medium';
   active: boolean;
   passwordExpiresAt?: string | null;
 }
@@ -88,16 +88,20 @@ export class UserManagementService {
   }
 
   private normalizeRole(role: unknown): ManagedUser['role'] {
-    const normalized = String(role || 'STUDENT').toUpperCase();
-    if (normalized === 'ADMIN' || normalized === 'ADMINISTRADOR') {
-      return 'ADMIN';
+    const normalized = String(role || 'aluno').toLowerCase();
+    if (normalized === 'administrador' || normalized === 'admin') {
+      return 'administrador';
     }
 
-    if (normalized === 'TEACHER' || normalized === 'PROFESSOR') {
-      return 'TEACHER';
+    if (normalized === 'professor' || normalized === 'teacher') {
+      return 'professor';
     }
 
-    return 'STUDENT';
+    if (normalized === 'medium') {
+      return 'medium';
+    }
+
+    return 'aluno';
   }
 
   approveUser(userId: string | number): Observable<ManagedUser> {
@@ -107,7 +111,7 @@ export class UserManagementService {
         username: 'feature-disabled',
         email: 'feature-disabled@example.com',
         fullName: 'Feature disabled',
-        role: 'STUDENT',
+        role: 'aluno',
         active: false,
         passwordExpiresAt: null
       });
@@ -124,7 +128,7 @@ export class UserManagementService {
     return this.http.delete<{ message: string }>(`${this.adminApiUrl}/${userId}/reject`);
   }
 
-  updateUserRole(userId: string | number, role: 'TEACHER' | 'STUDENT'): Observable<ManagedUser> {
+  updateUserRole(userId: string | number, role: 'administrador' | 'professor' | 'aluno' | 'medium'): Observable<ManagedUser> {
     if (!isFeatureAdminAdmissionOn()) {
       return of({
         id: userId,
@@ -147,12 +151,55 @@ export class UserManagementService {
         username: 'feature-disabled',
         email: 'feature-disabled@example.com',
         fullName: 'Feature disabled',
-        role: 'STUDENT',
+        role: 'aluno',
         active: false,
         passwordExpiresAt: new Date().toISOString()
       });
     }
 
     return this.http.post<ManagedUser>(`${this.adminApiUrl}/${userId}/password/expire`, {});
+  }
+
+  /**
+   * Approve a pending user via the new Supabase-based endpoint
+   * @param userId The user ID to approve
+   * @returns Observable with the updated user data and approval status
+   */
+  approvePendingUser(userId: string | number): Observable<{
+    message: string;
+    userId: string;
+    isPendingApproval: boolean;
+    approved: boolean;
+  }> {
+    const apiUrl = environment.apiUrl || '/api';
+    return this.http.patch<{
+      message: string;
+      userId: string;
+      isPendingApproval: boolean;
+      approved: boolean;
+    }>(`${apiUrl}/auth/pending-approvals/${userId}`, { approved: true });
+  }
+
+  /**
+   * Reject a pending user via the new Supabase-based endpoint
+   * Deletes the user from Supabase auth and removes their data from profiles and user_roles tables
+   * @param userId The user ID to reject
+   * @returns Observable with the rejection result and deletion status
+   */
+  rejectPendingUser(userId: string | number): Observable<{
+    message: string;
+    userId: string;
+    isPendingApproval: boolean;
+    approved: boolean;
+    deletionCompleted?: boolean;
+  }> {
+    const apiUrl = environment.apiUrl || '/api';
+    return this.http.patch<{
+      message: string;
+      userId: string;
+      isPendingApproval: boolean;
+      approved: boolean;
+      deletionCompleted?: boolean;
+    }>(`${apiUrl}/auth/pending-approvals/${userId}`, { approved: false });
   }
 }

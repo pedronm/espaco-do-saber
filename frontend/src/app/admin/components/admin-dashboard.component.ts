@@ -55,8 +55,18 @@ import { AuthService } from '../../shared/services/auth.service';
               <div>{{ user.username }} • {{ user.email }}</div>
             </div>
             <div class="user-actions">
-              <button class="btn-action approve" (click)="approveUser(toNumberId(user.id))">Aprovar</button>
-              <button class="btn-action reject" (click)="rejectUser(toNumberId(user.id))">Rejeitar</button>
+              <button class="btn-action approve" 
+                      (click)="approveUser(toNumberId(user.id))"
+                      [disabled]="approvingUserIds.has(String(user.id))"
+                      [attr.aria-busy]="approvingUserIds.has(String(user.id))">
+                {{ approvingUserIds.has(String(user.id)) ? 'Processando...' : 'Aprovar' }}
+              </button>
+              <button class="btn-action reject" 
+                      (click)="rejectUser(toNumberId(user.id))"
+                      [disabled]="approvingUserIds.has(String(user.id))"
+                      [attr.aria-busy]="approvingUserIds.has(String(user.id))">
+                {{ approvingUserIds.has(String(user.id)) ? 'Processando...' : 'Rejeitar' }}
+              </button>
             </div>
           </div>
         </div>
@@ -190,8 +200,12 @@ import { AuthService } from '../../shared/services/auth.service';
       padding: 0.45rem 0.75rem;
       cursor: pointer;
     }
-    .btn-action:hover {
+    .btn-action:hover:not(:disabled) {
       background: #f7f7f7;
+    }
+    .btn-action:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
     }
     .btn-action.approve {
       border-color: #2e7d32;
@@ -234,6 +248,8 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   obsStreamKey: string = '';
   private liveSubscription?: Subscription;
   private previousActiveLiveCount: number = 0;
+  private approvalTimeouts: Map<string, NodeJS.Timeout> = new Map();
+  approvingUserIds: Set<string> = new Set();
 
   constructor(
     private videoService: VideoService,
@@ -276,6 +292,9 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.liveSubscription?.unsubscribe();
+    // Clean up any pending timeouts
+    this.approvalTimeouts.forEach(timeout => clearTimeout(timeout));
+    this.approvalTimeouts.clear();
   }
 
   loadAllVideos(): void {
@@ -341,9 +360,63 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.userManagementService.approveUser(userId).subscribe({
-      next: () => this.loadUsers(),
-      error: () => alert('Falha ao aprovar cadastro.')
+    const userIdStr = String(userId);
+    if (this.approvingUserIds.has(userIdStr)) {
+      console.warn(`Approval already in progress for userId ${userId}`);
+      return;
+    }
+
+    this.approvingUserIds.add(userIdStr);
+    const REQUEST_TIMEOUT = 15000; // 15 seconds timeout
+
+    // Set a timeout to prevent infinite loading state
+    const timeoutId = setTimeout(() => {
+      this.approvingUserIds.delete(userIdStr);
+      this.approvalTimeouts.delete(userIdStr);
+      alert('A requisição excedeu o tempo permitido. Por favor, tente novamente.');
+      console.error(`Approval request timeout for userId ${userId}`);
+    }, REQUEST_TIMEOUT);
+
+    this.approvalTimeouts.set(userIdStr, timeoutId);
+
+    console.log(`Approving user ${userId}...`);
+
+    this.userManagementService.approvePendingUser(userId).subscribe({
+      next: (response) => {
+        this.approvingUserIds.delete(userIdStr);
+        const timeout = this.approvalTimeouts.get(userIdStr);
+        if (timeout) {
+          clearTimeout(timeout);
+          this.approvalTimeouts.delete(userIdStr);
+        }
+
+        console.log(`User ${userId} approved successfully:`, response);
+        alert(`Usuário aprovado com sucesso! Aprovação: ${response.approved}`);
+        this.loadUsers();
+      },
+      error: (error) => {
+        this.approvingUserIds.delete(userIdStr);
+        const timeout = this.approvalTimeouts.get(userIdStr);
+        if (timeout) {
+          clearTimeout(timeout);
+          this.approvalTimeouts.delete(userIdStr);
+        }
+
+        console.error(`Failed to approve user ${userId}:`, error);
+        
+        if (error.error?.code === 'TIMEOUT' || error.error?.code === 'TIMEOUT_EXCEPTION') {
+          alert('A operação excedeu o tempo limite. O usuário pode ter sido aprovado. Por favor, recarregue a página.');
+        } else if (error.error?.code === 'USER_NOT_FOUND') {
+          alert('Usuário não encontrado no sistema.');
+        } else if (error.status === 403) {
+          alert('Você não tem permissão para aprovar usuários.');
+        } else if (error.status === 504 || error.status === 502) {
+          alert('Erro de conexão ao processar a aprovação. Por favor, tente novamente.');
+        } else {
+          const errorMsg = error.error?.detail || error.error?.message || 'Falha ao aprovar cadastro.';
+          alert(errorMsg);
+        }
+      }
     });
   }
 
@@ -353,9 +426,63 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.userManagementService.rejectUser(userId).subscribe({
-      next: () => this.loadUsers(),
-      error: () => alert('Falha ao rejeitar cadastro.')
+    const userIdStr = String(userId);
+    if (this.approvingUserIds.has(userIdStr)) {
+      console.warn(`Rejection already in progress for userId ${userId}`);
+      return;
+    }
+
+    this.approvingUserIds.add(userIdStr);
+    const REQUEST_TIMEOUT = 15000; // 15 seconds timeout
+
+    // Set a timeout to prevent infinite loading state
+    const timeoutId = setTimeout(() => {
+      this.approvingUserIds.delete(userIdStr);
+      this.approvalTimeouts.delete(userIdStr);
+      alert('A requisição excedeu o tempo permitido. Por favor, tente novamente.');
+      console.error(`Rejection request timeout for userId ${userId}`);
+    }, REQUEST_TIMEOUT);
+
+    this.approvalTimeouts.set(userIdStr, timeoutId);
+
+    console.log(`Rejecting user ${userId}...`);
+
+    this.userManagementService.rejectPendingUser(userId).subscribe({
+      next: (response) => {
+        this.approvingUserIds.delete(userIdStr);
+        const timeout = this.approvalTimeouts.get(userIdStr);
+        if (timeout) {
+          clearTimeout(timeout);
+          this.approvalTimeouts.delete(userIdStr);
+        }
+
+        console.log(`User ${userId} rejected successfully:`, response);
+        alert(`Cadastro rejeitado! O usuário será removido da lista.`);
+        this.loadUsers();
+      },
+      error: (error) => {
+        this.approvingUserIds.delete(userIdStr);
+        const timeout = this.approvalTimeouts.get(userIdStr);
+        if (timeout) {
+          clearTimeout(timeout);
+          this.approvalTimeouts.delete(userIdStr);
+        }
+
+        console.error(`Failed to reject user ${userId}:`, error);
+        
+        if (error.error?.code === 'TIMEOUT' || error.error?.code === 'TIMEOUT_EXCEPTION') {
+          alert('A operação excedeu o tempo limite. O cadastro pode ter sido rejeitado. Por favor, recarregue a página.');
+        } else if (error.error?.code === 'USER_NOT_FOUND') {
+          alert('Usuário não encontrado no sistema.');
+        } else if (error.status === 403) {
+          alert('Você não tem permissão para rejeitar usuários.');
+        } else if (error.status === 504 || error.status === 502) {
+          alert('Erro de conexão ao processar a rejeição. Por favor, tente novamente.');
+        } else {
+          const errorMsg = error.error?.detail || error.error?.message || 'Falha ao rejeitar cadastro.';
+          alert(errorMsg);
+        }
+      }
     });
   }
 

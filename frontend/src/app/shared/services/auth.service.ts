@@ -460,7 +460,7 @@ export class AuthService {
 
       const payload = await response.json().catch(() => ({}));
       console.log('DEBUG: /api/me response:', payload);
-      return payload?.isPendingApproval === true;
+      return payload?.isPendingApproval;
     } catch (error) {
       console.error('DEBUG: /api/me exception:', error);
       return false;

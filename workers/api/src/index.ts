@@ -4,7 +4,7 @@ import { createRemoteJWKSet, jwtVerify, JWTPayload } from 'jose';
 import { neon } from '@neondatabase/serverless';
 import { createClient } from '@supabase/supabase-js';
 
-type Role = 'administrador' | 'professor' | 'aluno' | 'visitante';
+type Role = 'administrador' | 'professor' | 'aluno' | 'visitante' | 'medium';
 
 type AppBindings = {
   VIDEOS_BUCKET: R2Bucket;
@@ -265,34 +265,26 @@ app.post('/api/auth/pending-approvals', async (c) => {
       auth: { persistSession: false }
     });
 
-    const { data: usersData, error } = await supabase.auth.admin.listUsers();
+    // Fetch pending approval users from profiles table
+    const { data: pendingProfiles, error } = await supabase
+      .from('profiles')
+      .select('user_id, username, email, full_name, role, is_pendente_aprovacao')
+      .eq('is_pendente_aprovacao', true);
     
-    if (error || !usersData?.users) {
-      console.error('Failed to list users:', error?.message);
-      return c.json({ message: 'Unable to load pending approvals', detail: error?.message }, 502);
+    if (error) {
+      console.error('Failed to fetch pending profiles:', error.message);
+      return c.json({ message: 'Unable to load pending approvals', detail: error.message }, 502);
     }
 
-    const pendingUsers = usersData.users
-      .filter((candidate) => {
-        const appMetadata = candidate?.app_metadata || {};
-        const pendingApproval = appMetadata?.is_pendente_aprovacao === true;
-        const missingEmailConfirmation = !candidate?.email_confirmed_at;
-        return pendingApproval || missingEmailConfirmation;
-      })
-      .map((candidate) => {
-        const appMetadata = candidate?.app_metadata || {};
-        const userMetadata = candidate?.user_metadata || {};
-        const mappedRole = toManagedUserRole(String(appMetadata?.app_role || appMetadata?.user_role || 'aluno'));
-        return {
-          id: String(candidate?.id || ''),
-          username: String(userMetadata?.username || candidate?.email || ''),
-          email: String(candidate?.email || ''),
-          fullName: String(userMetadata?.fullName || userMetadata?.name || candidate?.email || ''),
-          role: mappedRole,
-          active: Boolean(candidate?.email_confirmed_at),
-          passwordExpiresAt: null
-        };
-      });
+    const pendingUsers = (pendingProfiles || []).map((profile) => ({
+      id: String(profile?.user_id || ''),
+      username: String(profile?.username || profile?.email || ''),
+      email: String(profile?.email || ''),
+      fullName: String(profile?.full_name || profile?.email || ''),
+      role: toManagedUserRole(String(profile?.role || 'aluno')),
+      active: true,
+      passwordExpiresAt: null
+    }));
 
     return c.json(pendingUsers);
   } catch (error) {
@@ -300,6 +292,147 @@ app.post('/api/auth/pending-approvals', async (c) => {
       message: 'Failed to load pending approvals.',
       detail: error instanceof Error ? error.message : String(error)
     }, 500);
+  }
+});
+
+app.patch('/api/auth/pending-approvals/:userId', async (c) => {
+  const requestStartTime = Date.now();
+  const REQUEST_TIMEOUT = 10000; // 10 seconds timeout
+  
+  const admin = c.get('user');
+  if (!admin.roles.includes('administrador')) {
+    return c.json({ message: 'Forbidden' }, 403);
+  }
+
+  const userId = c.req.param('userId');
+  if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
+    return c.json({ message: 'userId parameter is required' }, 400);
+  }
+
+  if (!c.env.SUPABASE_SERVICE_KEY) {
+    console.log(`Supabase service key is missing.`);
+    return c.json({ message: 'Service configuration error' }, 500);
+  }
+
+  try {
+    const body = await c.req.json<{ approved: boolean }>().catch(() => ({}));
+    const approved = typeof body?.approved === 'boolean' ? body.approved : null;
+
+    if (approved === null) {
+      console.log(`Invalid request payload: approved field is missing or not boolean`);
+      return c.json({ message: 'approved field is required (boolean)' }, 400);
+    }
+
+    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY, {
+      auth: { persistSession: false }
+    });
+
+    console.log(`admin.approval.start: userId=${userId}, adminId=${admin.sub}, approved=${approved}`);
+
+    // If rejecting, delete the user from Supabase and remove their data
+    if (!approved) {
+      console.log(`Attempting to delete rejected user: ${userId}`);
+      
+      // Delete user from Supabase auth
+      const deleteUserResult = await supabase.auth.admin.deleteUser(userId);
+      
+      if (deleteUserResult.error) {
+        console.log(`Failed to delete user from auth: userId=${userId}, error=${JSON.stringify(deleteUserResult.error)}`);
+        // Continue with data deletion even if user deletion fails
+      } else {
+        console.log(`User successfully deleted from Supabase auth: userId=${userId}`);
+      }
+
+      // Delete from profiles table
+      const { error: profileDeleteError } = await supabase
+        .from('profiles')
+        .delete()
+        .eq('user_id', userId);
+
+      if (profileDeleteError) {
+        console.log(`Failed to delete profile: userId=${userId}, error=${JSON.stringify(profileDeleteError)}`);
+      } else {
+        console.log(`Profile successfully deleted: userId=${userId}`);
+      }
+
+      // Delete from user_roles table
+      const { error: rolesDeleteError } = await supabase
+        .from('user_roles')
+        .delete()
+        .eq('user_id', userId);
+
+      if (rolesDeleteError) {
+        console.log(`Failed to delete user_roles: userId=${userId}, error=${JSON.stringify(rolesDeleteError)}`);
+      } else {
+        console.log(`User roles successfully deleted: userId=${userId}`);
+      }
+
+      console.log(`User rejection completed: userId=${userId}, adminId=${admin.sub}`);
+
+      return c.json({
+        message: 'User rejected and data deleted successfully',
+        userId: userId,
+        isPendingApproval: true,
+        approved: false,
+        deletionCompleted: true
+      }, 200);
+    }
+
+    // Approval flow: Update the profiles table with the approval status
+    const { data, error } = await supabase
+      .from('profiles')
+      .update({ is_pendente_aprovacao: !approved })
+      .eq('user_id', userId)
+      .select('user_id, is_pendente_aprovacao')
+      .single();
+
+    // Check for timeout
+    if (Date.now() - requestStartTime > REQUEST_TIMEOUT) {
+      console.log(`admin.approval.timeout: userId=${userId}, adminId=${admin.sub}, durationMs=${Date.now() - requestStartTime}`);
+      return c.json({
+        message: 'Request timeout - approval status may not have been updated',
+        code: 'TIMEOUT'
+      }, 504);
+    }
+
+    if (error) {
+      console.log(`admin.approval.query_error: userId=${userId}, adminId=${admin.sub}, errorCode=${error.code}, errorMessage=${error.message}`);
+      return c.json({
+        message: 'Failed to update approval status',
+        detail: error.message,
+        code: error.code
+      }, 502);
+    }
+
+    if (!data) {
+      console.log(`admin.approval.user_not_found: userId=${userId}, adminId=${admin.sub}`);
+      return c.json({
+        message: 'User profile not found',
+        code: 'USER_NOT_FOUND'
+      }, 404);
+    }
+
+    console.log(`admin.approval.success: userId=${userId}, adminId=${admin.sub}, approved=${approved}, newStatus=${data.is_pendente_aprovacao}, durationMs=${Date.now() - requestStartTime}`);
+
+    return c.json({
+      message: 'User approved successfully',
+      userId: data.user_id,
+      isPendingApproval: data.is_pendente_aprovacao,
+      approved
+    }, 200);
+  } catch (error) {
+    const errorDuration = Date.now() - requestStartTime;
+    const isTimeoutException = errorDuration > REQUEST_TIMEOUT;
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+
+    console.log(`admin.approval.exception: userId=${c.req.param('userId')}, adminId=${admin.sub}, errorMessage=${errorMsg}, errorStack=${errorStack}, durationMs=${errorDuration}, isTimeout=${isTimeoutException}`);
+
+    return c.json({
+      message: isTimeoutException ? 'Request timeout' : 'Failed to process approval',
+      detail: errorMsg,
+      code: isTimeoutException ? 'TIMEOUT' : 'EXCEPTION'
+    }, isTimeoutException ? 504 : 500);
   }
 });
 
@@ -682,20 +815,24 @@ function resolveResponseOrigin(requestOrigin: string | undefined, allowedOrigins
   return null;
 }
 
-function toManagedUserRole(rawRole: string): 'ADMIN' | 'TEACHER' | 'STUDENT' {
+function toManagedUserRole(rawRole: string): 'administrador' | 'professor' | 'aluno' | 'medium' {
   const normalized = (rawRole || '').trim().toLowerCase();
   if (normalized === 'administrador') {
-    return 'ADMIN';
+    return 'administrador';
   }
 
   if (normalized === 'professor') {
-    return 'TEACHER';
+    return 'professor';
   }
 
-  return 'STUDENT';
+  if (normalized === 'medium') {
+    return 'medium';
+  }
+
+  return 'aluno';
 }
 
-async function   cvreadIsPendingApproval(supabaseUrl: string, serviceKey: string | undefined, userId: string): Promise<boolean> {
+async function readIsPendingApproval(supabaseUrl: string, serviceKey: string | undefined, userId: string): Promise<boolean> {
   console.log(`DEBUG: Checking pending approval for user ${userId} using Supabase at ${supabaseUrl} is serviceKey ${serviceKey ? 'provided' : 'not provided'}`);
   if (!userId || !supabaseUrl || !serviceKey) {
     return false;
@@ -708,26 +845,15 @@ async function   cvreadIsPendingApproval(supabaseUrl: string, serviceKey: string
 
     // Query the profiles table in Supabase PostgreSQL database
     const { data, error } = await supabase
-      .from('public.profiles')
-      .select('id, is_pendente_aprovacao')
-      .eq('id', userId)
+      .from('profiles')
+      .select('user_id, is_pendente_aprovacao')
+      .eq('user_id', userId)
       .single();
-    
-    if (error || !data) {
-      console.warn(JSON.stringify({
-        level: 'warn',
-        event: 'auth.pending-approval.user_not_found',
-        userId,
-        source: 'profiles_table',
-        error: error?.message
-      }));
-      return false;
-    }
-
+        
     console.log(`DEBUG: Profile data for ${userId}:`, JSON.stringify(data));
     
     // Check profiles table for pending_approval flag
-    const isPending = data?.is_pendente_aprovacao === true;
+    const isPending = data?.is_pendente_aprovacao;
     
     console.log(JSON.stringify({
       level: 'debug',
