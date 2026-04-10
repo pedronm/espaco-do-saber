@@ -56,16 +56,16 @@ import { AuthService } from '../../shared/services/auth.service';
             </div>
             <div class="user-actions">
               <button class="btn-action approve" 
-                      (click)="approveUser(toNumberId(user.id))"
-                      [disabled]="approvingUserIds.has(String(user.id))"
-                      [attr.aria-busy]="approvingUserIds.has(String(user.id))">
-                {{ approvingUserIds.has(String(user.id)) ? 'Processando...' : 'Aprovar' }}
+                      (click)="approveUser(user.id)"
+                      [disabled]="isApproving(user)"
+                      [attr.aria-busy]="isApproving(user)">
+                {{ isApproving(user) ? 'Processando...' : 'Aprovar' }}
               </button>
               <button class="btn-action reject" 
-                      (click)="rejectUser(toNumberId(user.id))"
-                      [disabled]="approvingUserIds.has(String(user.id))"
-                      [attr.aria-busy]="approvingUserIds.has(String(user.id))">
-                {{ approvingUserIds.has(String(user.id)) ? 'Processando...' : 'Rejeitar' }}
+                      (click)="rejectUser(user.id)"
+                      [disabled]="isApproving(user)"
+                      [attr.aria-busy]="isApproving(user)">
+                {{ isApproving(user) ? 'Processando...' : 'Rejeitar' }}
               </button>
             </div>
           </div>
@@ -83,9 +83,9 @@ import { AuthService } from '../../shared/services/auth.service';
               <small>Papel atual: {{ roleLabel(user.role) }}</small>
               <span class="status-chip" *ngIf="user.passwordExpiresAt">Troca de senha pendente</span>
             </div>
-            <div class="user-actions" *ngIf="user.role !== 'ADMIN'">
-              <button class="btn-action" (click)="setRole(user, 'TEACHER')">Professor</button>
-              <button class="btn-action" (click)="setRole(user, 'STUDENT')">Aluno</button>
+            <div class="user-actions" *ngIf="user.role !== 'administrador'">
+              <button class="btn-action" (click)="setRole(user, 'professor')">Professor</button>
+              <button class="btn-action" (click)="setRole(user, 'aluno')">Aluno</button>
               <button class="btn-action" (click)="expirePassword(user)">Solicitar troca de senha</button>
             </div>
           </div>
@@ -354,15 +354,18 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     this.router.navigate(['/video', video.id]);
   }
 
-  approveUser(userId: number): void {
-    if (!Number.isFinite(userId)) {
+  isApproving(user: ManagedUser): boolean {
+    return this.approvingUserIds.has(String(user.id));
+  }
+
+  approveUser(userId: string | number): void {
+    const userIdStr = String(userId ?? '').trim();
+    if (!userIdStr || userIdStr === 'NaN') {
       alert('ID de usuário inválido para aprovação.');
       return;
     }
-
-    const userIdStr = String(userId);
     if (this.approvingUserIds.has(userIdStr)) {
-      console.warn(`Approval already in progress for userId ${userId}`);
+      console.warn(`Approval already in progress for userId ${userIdStr}`);
       return;
     }
 
@@ -374,14 +377,14 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       this.approvingUserIds.delete(userIdStr);
       this.approvalTimeouts.delete(userIdStr);
       alert('A requisição excedeu o tempo permitido. Por favor, tente novamente.');
-      console.error(`Approval request timeout for userId ${userId}`);
+      console.error(`Approval request timeout for userId ${userIdStr}`);
     }, REQUEST_TIMEOUT);
 
     this.approvalTimeouts.set(userIdStr, timeoutId);
 
-    console.log(`Approving user ${userId}...`);
+    console.log(`Approving user ${userIdStr}...`);
 
-    this.userManagementService.approvePendingUser(userId).subscribe({
+    this.userManagementService.approvePendingUser(userIdStr).subscribe({
       next: (response) => {
         this.approvingUserIds.delete(userIdStr);
         const timeout = this.approvalTimeouts.get(userIdStr);
@@ -390,7 +393,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
           this.approvalTimeouts.delete(userIdStr);
         }
 
-        console.log(`User ${userId} approved successfully:`, response);
+        console.log(`User ${userIdStr} approved successfully:`, response);
         alert(`Usuário aprovado com sucesso! Aprovação: ${response.approved}`);
         this.loadUsers();
       },
@@ -402,7 +405,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
           this.approvalTimeouts.delete(userIdStr);
         }
 
-        console.error(`Failed to approve user ${userId}:`, error);
+        console.error(`Failed to approve user ${userIdStr}:`, error);
         
         if (error.error?.code === 'TIMEOUT' || error.error?.code === 'TIMEOUT_EXCEPTION') {
           alert('A operação excedeu o tempo limite. O usuário pode ter sido aprovado. Por favor, recarregue a página.');
@@ -420,15 +423,14 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     });
   }
 
-  rejectUser(userId: number): void {
-    if (!Number.isFinite(userId)) {
+  rejectUser(userId: string | number): void {
+    const userIdStr = String(userId ?? '').trim();
+    if (!userIdStr || userIdStr === 'NaN') {
       alert('ID de usuário inválido para rejeição.');
       return;
     }
-
-    const userIdStr = String(userId);
     if (this.approvingUserIds.has(userIdStr)) {
-      console.warn(`Rejection already in progress for userId ${userId}`);
+      console.warn(`Rejection already in progress for userId ${userIdStr}`);
       return;
     }
 
@@ -440,14 +442,14 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
       this.approvingUserIds.delete(userIdStr);
       this.approvalTimeouts.delete(userIdStr);
       alert('A requisição excedeu o tempo permitido. Por favor, tente novamente.');
-      console.error(`Rejection request timeout for userId ${userId}`);
+      console.error(`Rejection request timeout for userId ${userIdStr}`);
     }, REQUEST_TIMEOUT);
 
     this.approvalTimeouts.set(userIdStr, timeoutId);
 
-    console.log(`Rejecting user ${userId}...`);
+    console.log(`Rejecting user ${userIdStr}...`);
 
-    this.userManagementService.rejectPendingUser(userId).subscribe({
+    this.userManagementService.rejectPendingUser(userIdStr).subscribe({
       next: (response) => {
         this.approvingUserIds.delete(userIdStr);
         const timeout = this.approvalTimeouts.get(userIdStr);
@@ -456,7 +458,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
           this.approvalTimeouts.delete(userIdStr);
         }
 
-        console.log(`User ${userId} rejected successfully:`, response);
+        console.log(`User ${userIdStr} rejected successfully:`, response);
         alert(`Cadastro rejeitado! O usuário será removido da lista.`);
         this.loadUsers();
       },
@@ -468,7 +470,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
           this.approvalTimeouts.delete(userIdStr);
         }
 
-        console.error(`Failed to reject user ${userId}:`, error);
+        console.error(`Failed to reject user ${userIdStr}:`, error);
         
         if (error.error?.code === 'TIMEOUT' || error.error?.code === 'TIMEOUT_EXCEPTION') {
           alert('A operação excedeu o tempo limite. O cadastro pode ter sido rejeitado. Por favor, recarregue a página.');
@@ -486,7 +488,7 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
     });
   }
 
-  setRole(user: ManagedUser, role: 'TEACHER' | 'STUDENT'): void {
+  setRole(user: ManagedUser, role: 'professor' | 'aluno'): void {
     if (user.role === role) {
       return;
     }
@@ -522,17 +524,16 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
 
   roleLabel(role: ManagedUser['role']): string {
     switch (role) {
-      case 'ADMIN':
+      case 'administrador':
         return 'Administrador';
-      case 'TEACHER':
+      case 'professor':
         return 'Professor';
+      case 'medium':
+        return 'Médium';
+      case 'aluno':
       default:
         return 'Aluno';
     }
-  }
-
-  toNumberId(id: string | number): number {
-    return Number(id);
   }
 
   private extractLiveIdFromStreamingUrl(streamingUrl: string | undefined): string | null {

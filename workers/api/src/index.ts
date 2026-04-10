@@ -83,7 +83,7 @@ app.use('/*', async (c, next) => {
       return '';
     },
     allowHeaders: ['Authorization', 'Content-Type', 'apikey', 'x-client-info', 'x-supabase-auth', 'sb-access-token'],
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
   })(c, next);
 });
 
@@ -184,7 +184,7 @@ app.use('/api/*', async (c, next) => {
       raw: payload
     });
 
-    const isPendingApproval = await readIsPendingApproval(c.env.NEON_DATABASE_URL, c.env.SUPABASE_SERVICE_KEY, String(payload.sub || ''));
+    const isPendingApproval = await readIsPendingApproval(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY, String(payload.sub || ''));
     if (isPendingApproval) {
       return c.json({
         code: 'PENDING_APPROVAL',
@@ -249,7 +249,7 @@ app.get('/api/me/debug', async (c) => {
   }
 });
 
-app.post('/api/auth/pending-approvals', async (c) => {
+app.get('/api/auth/pending-approvals', async (c) => {
   const user = c.get('user');
   if (!user.roles.includes('administrador')) {
     return c.json({ message: 'Forbidden' }, 403);
@@ -257,7 +257,7 @@ app.post('/api/auth/pending-approvals', async (c) => {
 
   if (!c.env.SUPABASE_SERVICE_KEY) {
     console.error('Supabase service key is missing.');
-    return c.json({ message: 'Falha ao cadastrar!.' }, 500);
+    return c.json({ message: 'Service configuration error' }, 500);
   }
 
   try {
@@ -265,26 +265,49 @@ app.post('/api/auth/pending-approvals', async (c) => {
       auth: { persistSession: false }
     });
 
-    // Fetch pending approval users from profiles table
     const { data: pendingProfiles, error } = await supabase
       .from('profiles')
       .select('user_id, username, email, full_name, role, is_pendente_aprovacao')
       .eq('is_pendente_aprovacao', true);
-    
+
     if (error) {
       console.error('Failed to fetch pending profiles:', error.message);
       return c.json({ message: 'Unable to load pending approvals', detail: error.message }, 502);
     }
 
-    const pendingUsers = (pendingProfiles || []).map((profile) => ({
-      id: String(profile?.user_id || ''),
-      username: String(profile?.username || profile?.email || ''),
-      email: String(profile?.email || ''),
-      fullName: String(profile?.full_name || profile?.email || ''),
-      role: toManagedUserRole(String(profile?.role || 'aluno')),
-      active: true,
-      passwordExpiresAt: null
-    }));
+    const profiles = pendingProfiles || [];
+    const pendingUsers = await Promise.all(
+      profiles.map(async (profile) => {
+        const id = String(profile?.user_id || '');
+        let email = String(profile?.email || '');
+        let active = true;
+        let passwordExpiresAt: string | null = null;
+
+        const { data: authLookup, error: authErr } = await supabase.auth.admin.getUserById(id);
+        if (!authErr && authLookup?.user) {
+          const u = authLookup.user;
+          if (!email && u.email) {
+            email = u.email;
+          }
+          active = !u.banned_until;
+          const meta = u.user_metadata as Record<string, unknown> | undefined;
+          const rawExpiry =
+            (meta?.password_expires_at as string | undefined) ??
+            (meta?.passwordExpiresAt as string | undefined);
+          passwordExpiresAt = typeof rawExpiry === 'string' ? rawExpiry : null;
+        }
+
+        return {
+          id,
+          username: String(profile?.username || profile?.email || email || ''),
+          email,
+          fullName: String(profile?.full_name || profile?.email || email || ''),
+          role: toManagedUserRole(String(profile?.role || 'aluno')),
+          active,
+          passwordExpiresAt
+        };
+      })
+    );
 
     return c.json(pendingUsers);
   } catch (error) {
@@ -315,8 +338,8 @@ app.patch('/api/auth/pending-approvals/:userId', async (c) => {
   }
 
   try {
-    const body = await c.req.json<{ approved: boolean }>().catch(() => ({}));
-    const approved = typeof body?.approved === 'boolean' ? body.approved : null;
+    const body = await c.req.json<{ approved?: boolean }>().catch((): { approved?: boolean } => ({}));
+    const approved = typeof body.approved === 'boolean' ? body.approved : null;
 
     if (approved === null) {
       console.log(`Invalid request payload: approved field is missing or not boolean`);

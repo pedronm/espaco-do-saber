@@ -1,10 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, from, of } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { isFeatureAdminAdmissionOn } from '../constants/feature-flags';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 export interface ManagedUser {
   id: string | number;
@@ -29,22 +28,8 @@ export interface PagedUsersResponse {
 })
 export class UserManagementService {
   private adminApiUrl = `${environment.apiUrl}/admin/users`;
-  private supabase: SupabaseClient;
 
-  constructor(private http: HttpClient) {
-    this.supabase = createClient(environment.supabase.url, environment.supabase.publishableKey, {
-      global: {
-        headers: {
-          apikey: environment.supabase.publishableKey
-        }
-      },
-      auth: {
-        persistSession: true,
-        autoRefreshToken: true,
-        detectSessionInUrl: true
-      }
-    });
-  }
+  constructor(private http: HttpClient) {}
 
   getAllUsers(page: number, size: number): Observable<PagedUsersResponse> {
     if (!isFeatureAdminAdmissionOn()) {
@@ -65,16 +50,10 @@ export class UserManagementService {
       return of([]);
     }
 
-    return from(this.supabase.functions.invoke('retrieve-pending-user', {
-      body: {}
-    })).pipe(
-      map(({ data, error }) => {
-        if (error) {
-          throw error;
-        }
-
-        const list = Array.isArray(data) ? data : [];
-        return list.map((item: any) => ({
+    const apiUrl = environment.apiUrl || '/api';
+    return this.http.get<ManagedUser[]>(`${apiUrl}/auth/pending-approvals`).pipe(
+      map((list) =>
+        (Array.isArray(list) ? list : []).map((item: any) => ({
           id: item?.id ?? item?.user_id ?? item?.userId,
           username: item?.username ?? item?.user_name ?? item?.email ?? '',
           email: item?.email ?? '',
@@ -82,8 +61,8 @@ export class UserManagementService {
           role: this.normalizeRole(item?.role ?? item?.user_role),
           active: item?.active ?? false,
           passwordExpiresAt: item?.passwordExpiresAt ?? item?.password_expires_at ?? null
-        }));
-      })
+        }))
+      )
     );
   }
 
