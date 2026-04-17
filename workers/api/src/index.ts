@@ -37,6 +37,17 @@ type RegisterPayload = {
   accessType?: 'PUBLICO' | 'ALUNO';
 };
 
+/** Columns on `public.profiles` (Supabase). Email lives on auth.users; role on `user_roles`. */
+type ProfilesTableRow = {
+  user_id: string;
+  username: string | null;
+  nome_completo: string | null;
+  avatar_url: string | null;
+  is_pendente_aprovacao: boolean;
+  created_at: string;
+  updated_at: string | null;
+};
+
 const app = new Hono<{ Bindings: AppBindings; Variables: AppVariables }>();
 
 app.use('/*', async (c, next) => {
@@ -261,32 +272,64 @@ app.get('/api/auth/pending-approvals', async (c) => {
   }
 
   try {
+    const pageRaw = c.req.query('page');
+    const sizeRaw = c.req.query('size');
+    const page = Math.max(0, Math.trunc(Number(pageRaw ?? 0) || 0));
+    const size = Math.max(1, Math.min(100, Math.trunc(Number(sizeRaw ?? 10) || 10)));
+    const from = page * size;
+    const to = from + size - 1;
+
     const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY, {
       auth: { persistSession: false }
     });
 
-    const { data: pendingProfiles, error } = await supabase
+    const { data: pendingProfiles, error, count } = await supabase
       .from('profiles')
-      .select('user_id, username, email, full_name, role, is_pendente_aprovacao')
-      .eq('is_pendente_aprovacao', true);
+      .select(
+        'user_id, username, nome_completo, avatar_url, updated_at, created_at, is_pendente_aprovacao',
+        { count: 'exact' }
+      )
+      .eq('is_pendente_aprovacao', true)
+      .order('created_at', { ascending: false })
+      .range(from, to);
 
     if (error) {
       console.error('Failed to fetch pending profiles:', error.message);
       return c.json({ message: 'Unable to load pending approvals', detail: error.message }, 502);
     }
 
-    const profiles = pendingProfiles || [];
+    const profiles = (pendingProfiles || []) as ProfilesTableRow[];
+    const userIds = profiles.map((p) => String(p.user_id || '')).filter((id) => id.length > 0);
+
+    let roleByUserId = new Map<string, string>();
+    if (userIds.length > 0) {
+      const { data: roleRows, error: rolesErr } = await supabase
+        .from('user_roles')
+        .select('user_id, role')
+        .in('user_id', userIds);
+
+      if (rolesErr) {
+        console.error('Failed to fetch roles for pending profiles:', rolesErr.message);
+      } else if (roleRows) {
+        roleByUserId = new Map(
+          (roleRows as { user_id: string; role: string }[])
+            .filter((r) => r.user_id && r.role)
+            .map((r) => [r.user_id, r.role])
+        );
+      }
+    }
+
     const pendingUsers = await Promise.all(
       profiles.map(async (profile) => {
-        const id = String(profile?.user_id || '');
-        let email = String(profile?.email || '');
+        const id = String(profile.user_id || '');
+        let email = '';
         let active = true;
         let passwordExpiresAt: string | null = null;
 
         const { data: authLookup, error: authErr } = await supabase.auth.admin.getUserById(id);
         if (!authErr && authLookup?.user) {
           const u = authLookup.user;
-          if (!email && u.email) {
+          if (u.email) {
             email = u.email;
           }
           active = !u.banned_until;
@@ -297,19 +340,33 @@ app.get('/api/auth/pending-approvals', async (c) => {
           passwordExpiresAt = typeof rawExpiry === 'string' ? rawExpiry : null;
         }
 
+        const displayName =
+          profile.nome_completo && profile.nome_completo.trim().length > 0
+            ? profile.nome_completo.trim()
+            : email;
+
         return {
           id,
-          username: String(profile?.username || profile?.email || email || ''),
+          username: String(profile.username || email || ''),
           email,
-          fullName: String(profile?.full_name || profile?.email || email || ''),
-          role: toManagedUserRole(String(profile?.role || 'aluno')),
+          fullName: displayName,
+          role: toManagedUserRole(String(roleByUserId.get(id) || 'aluno')),
           active,
           passwordExpiresAt
         };
       })
     );
 
-    return c.json(pendingUsers);
+    const totalElements = Number.isFinite(count) ? Number(count) : profiles.length;
+    const totalPages = size > 0 ? Math.ceil(totalElements / size) : 0;
+
+    return c.json({
+      content: pendingUsers,
+      totalElements,
+      totalPages,
+      size,
+      number: page
+    });
   } catch (error) {
     return c.json({
       message: 'Failed to load pending approvals.',

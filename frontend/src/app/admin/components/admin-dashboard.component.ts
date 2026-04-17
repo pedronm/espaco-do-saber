@@ -47,6 +47,11 @@ import { AuthService } from '../../shared/services/auth.service';
 
       <div class="obs-section">
         <h3>Cadastros pendentes</h3>
+        <div class="pagination" *ngIf="totalPendingPages > 1">
+          <button class="btn-action" (click)="previousPendingPage()" [disabled]="pendingPage === 0">Anterior</button>
+          <span>Página {{ pendingPage + 1 }} de {{ totalPendingPages }} • {{ totalPendingUsers }} cadastros</span>
+          <button class="btn-action" (click)="nextPendingPage()" [disabled]="pendingPage + 1 >= totalPendingPages">Próxima</button>
+        </div>
         <p *ngIf="pendingUsers.length === 0">Nenhum cadastro pendente.</p>
         <div class="user-list" *ngIf="pendingUsers.length > 0">
           <div class="user-item" *ngFor="let user of pendingUsers">
@@ -239,6 +244,10 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   videos: Video[] = [];
   pendingUsers: ManagedUser[] = [];
   managedUsers: ManagedUser[] = [];
+  pendingPage: number = 0;
+  pendingPageSize: number = 10;
+  totalPendingPages: number = 0;
+  totalPendingUsers: number = 0;
   usersPage: number = 0;
   usersPageSize: number = 10;
   totalUserPages: number = 0;
@@ -304,11 +313,32 @@ export class AdminDashboardComponent implements OnInit, OnDestroy {
   }
 
   loadUsers(): void {
-    this.userManagementService.getPendingUsers().subscribe(users => {
-      this.pendingUsers = users;
-    });
+    this.loadPendingUsersPage(0);
 
     this.loadManagedUsersPage(this.usersPage);
+  }
+
+  loadPendingUsersPage(page: number): void {
+    this.userManagementService.getPendingUsersPage(page, this.pendingPageSize).subscribe((result) => {
+      this.pendingUsers = result.content;
+      this.pendingPage = result.number;
+      this.totalPendingPages = result.totalPages;
+      this.totalPendingUsers = result.totalElements;
+    });
+  }
+
+  nextPendingPage(): void {
+    if (this.pendingPage + 1 >= this.totalPendingPages) {
+      return;
+    }
+    this.loadPendingUsersPage(this.pendingPage + 1);
+  }
+
+  previousPendingPage(): void {
+    if (this.pendingPage <= 0) {
+      return;
+    }
+    this.loadPendingUsersPage(this.pendingPage - 1);
   }
 
   loadManagedUsersPage(page: number): void {

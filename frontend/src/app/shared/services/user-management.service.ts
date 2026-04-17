@@ -51,19 +51,37 @@ export class UserManagementService {
     }
 
     const apiUrl = environment.apiUrl || '/api';
-    return this.http.get<ManagedUser[]>(`${apiUrl}/auth/pending-approvals`).pipe(
-      map((list) =>
-        (Array.isArray(list) ? list : []).map((item: any) => ({
-          id: item?.id ?? item?.user_id ?? item?.userId,
-          username: item?.username ?? item?.user_name ?? item?.email ?? '',
-          email: item?.email ?? '',
-          fullName: item?.fullName ?? item?.nome_completo ?? item?.name ?? item?.username ?? '',
-          role: this.normalizeRole(item?.role ?? item?.user_role),
-          active: item?.active ?? false,
-          passwordExpiresAt: item?.passwordExpiresAt ?? item?.password_expires_at ?? null
+    return this.getPendingUsersPage(0, 50).pipe(map((result) => result.content));
+  }
+
+  getPendingUsersPage(page: number, size: number): Observable<PagedUsersResponse> {
+    if (!isFeatureAdminAdmissionOn()) {
+      return of({
+        content: [],
+        totalElements: 0,
+        totalPages: 0,
+        size,
+        number: page
+      });
+    }
+
+    const apiUrl = environment.apiUrl || '/api';
+    return this.http
+      .get<PagedUsersResponse>(`${apiUrl}/auth/pending-approvals?page=${page}&size=${size}`)
+      .pipe(
+        map((result) => ({
+          ...result,
+          content: (Array.isArray(result?.content) ? result.content : []).map((item: any) => ({
+            id: item?.id ?? item?.user_id ?? item?.userId,
+            username: item?.username ?? item?.user_name ?? item?.email ?? '',
+            email: item?.email ?? '',
+            fullName: item?.fullName ?? item?.nome_completo ?? item?.name ?? item?.username ?? '',
+            role: this.normalizeRole(item?.role ?? item?.user_role),
+            active: item?.active ?? false,
+            passwordExpiresAt: item?.passwordExpiresAt ?? item?.password_expires_at ?? null
+          }))
         }))
-      )
-    );
+      );
   }
 
   private normalizeRole(role: unknown): ManagedUser['role'] {
