@@ -516,6 +516,256 @@ app.patch('/api/auth/pending-approvals/:userId', async (c) => {
   }
 });
 
+app.get('/api/admin/users', async (c) => {
+  const admin = c.get('user');
+  if (!admin.roles.includes('administrador')) {
+    return c.json({ message: 'Forbidden' }, 403);
+  }
+
+  if (!c.env.SUPABASE_SERVICE_KEY) {
+    console.error('Supabase service key is missing.');
+    return c.json({ message: 'Service configuration error' }, 500);
+  }
+
+  try {
+    const pageRaw = c.req.query('page');
+    const sizeRaw = c.req.query('size');
+    const page = Math.max(0, Math.trunc(Number(pageRaw ?? 0) || 0));
+    const size = Math.max(1, Math.min(100, Math.trunc(Number(sizeRaw ?? 10) || 10)));
+    const from = page * size;
+    const to = from + size - 1;
+
+    const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY, {
+      auth: { persistSession: false }
+    });
+
+    const { data: profileRows, error, count } = await supabase
+      .from('profiles')
+      .select(
+        'user_id, username, nome_completo, avatar_url, updated_at, created_at, is_pendente_aprovacao',
+        { count: 'exact' }
+      )
+      .order('created_at', { ascending: false })
+      .range(from, to);
+
+    if (error) {
+      console.error('Failed to fetch profiles:', error.message);
+      return c.json({ message: 'Unable to load users', detail: error.message }, 502);
+    }
+
+    const profiles = (profileRows || []) as ProfilesTableRow[];
+    const userIds = profiles.map((p) => String(p.user_id || '')).filter((id) => id.length > 0);
+
+    let roleByUserId = new Map<string, string>();
+    if (userIds.length > 0) {
+      const { data: roleRows, error: rolesErr } = await supabase
+        .from('user_roles')
+        .select('user_id, role')
+        .in('user_id', userIds);
+
+      if (rolesErr) {
+        console.error('Failed to fetch roles for profiles:', rolesErr.message);
+      } else if (roleRows) {
+        roleByUserId = new Map(
+          (roleRows as { user_id: string; role: string }[])
+            .filter((r) => r.user_id && r.role)
+            .map((r) => [r.user_id, r.role])
+        );
+      }
+    }
+
+    const managedUsers = await Promise.all(
+      profiles.map(async (profile) => {
+        const id = String(profile.user_id || '');
+        let email = '';
+        let active = true;
+        let passwordExpiresAt: string | null = null;
+
+        const { data: authLookup, error: authErr } = await supabase.auth.admin.getUserById(id);
+        if (!authErr && authLookup?.user) {
+          const u = authLookup.user;
+          if (u.email) {
+            email = u.email;
+          }
+          active = !u.banned_until;
+          const meta = u.user_metadata as Record<string, unknown> | undefined;
+          const rawExpiry =
+            (meta?.password_expires_at as string | undefined) ??
+            (meta?.passwordExpiresAt as string | undefined);
+          passwordExpiresAt = typeof rawExpiry === 'string' ? rawExpiry : null;
+        }
+
+        const displayName =
+          profile.nome_completo && profile.nome_completo.trim().length > 0
+            ? profile.nome_completo.trim()
+            : email;
+
+        return {
+          id,
+          username: String(profile.username || email || ''),
+          email,
+          fullName: displayName,
+          role: toManagedUserRole(String(roleByUserId.get(id) || 'aluno')),
+          active,
+          passwordExpiresAt
+        };
+      })
+    );
+
+    const totalElements = Number.isFinite(count) ? Number(count) : profiles.length;
+    const totalPages = size > 0 ? Math.ceil(totalElements / size) : 0;
+
+    return c.json({
+      content: managedUsers,
+      totalElements,
+      totalPages,
+      size,
+      number: page
+    });
+  } catch (error) {
+    return c.json({
+      message: 'Failed to load users.',
+      detail: error instanceof Error ? error.message : String(error)
+    }, 500);
+  }
+});
+
+app.put('/api/admin/users/:userId/role', async (c) => {
+  const admin = c.get('user');
+  if (!admin.roles.includes('administrador')) {
+    return c.json({ message: 'Forbidden' }, 403);
+  }
+
+  const userId = c.req.param('userId');
+  if (!userId || userId.trim().length === 0) {
+    return c.json({ message: 'userId is required' }, 400);
+  }
+
+  if (!c.env.SUPABASE_SERVICE_KEY) {
+    return c.json({ message: 'Service configuration error' }, 500);
+  }
+
+  const body = await c.req.json<{ role?: string }>().catch((): { role?: string } => ({}));
+  const requested = typeof body.role === 'string' ? body.role.trim().toLowerCase() : '';
+  const allowed = new Set(['administrador', 'professor', 'aluno', 'medium']);
+  if (!allowed.has(requested)) {
+    return c.json({ message: 'role must be administrador, professor, aluno, or medium' }, 400);
+  }
+
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false }
+  });
+
+  const { error } = await supabase.from('user_roles').upsert(
+    { user_id: userId, role: requested },
+    { onConflict: 'user_id' }
+  );
+
+  if (error) {
+    console.error('user_roles upsert failed:', error.message);
+    return c.json({ message: 'Failed to update role', detail: error.message }, 502);
+  }
+
+  const profileRes = await supabase
+    .from('profiles')
+    .select('user_id, username, nome_completo')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  let email = '';
+  let active = true;
+  let passwordExpiresAt: string | null = null;
+  const { data: authLookup } = await supabase.auth.admin.getUserById(userId);
+  if (authLookup?.user) {
+    const u = authLookup.user;
+    email = u.email || '';
+    active = !u.banned_until;
+    const meta = u.user_metadata as Record<string, unknown> | undefined;
+    const rawExpiry =
+      (meta?.password_expires_at as string | undefined) ??
+      (meta?.passwordExpiresAt as string | undefined);
+    passwordExpiresAt = typeof rawExpiry === 'string' ? rawExpiry : null;
+  }
+
+  const profile = profileRes.data as ProfilesTableRow | null;
+  const displayName =
+    profile?.nome_completo && profile.nome_completo.trim().length > 0
+      ? profile.nome_completo.trim()
+      : email;
+
+  return c.json({
+    id: userId,
+    username: String(profile?.username || email || ''),
+    email,
+    fullName: displayName,
+    role: toManagedUserRole(requested),
+    active,
+    passwordExpiresAt
+  });
+});
+
+app.post('/api/admin/users/:userId/password/expire', async (c) => {
+  const admin = c.get('user');
+  if (!admin.roles.includes('administrador')) {
+    return c.json({ message: 'Forbidden' }, 403);
+  }
+
+  const userId = c.req.param('userId');
+  if (!userId || userId.trim().length === 0) {
+    return c.json({ message: 'userId is required' }, 400);
+  }
+
+  if (!c.env.SUPABASE_SERVICE_KEY) {
+    return c.json({ message: 'Service configuration error' }, 500);
+  }
+
+  const supabase = createClient(c.env.SUPABASE_URL, c.env.SUPABASE_SERVICE_KEY, {
+    auth: { persistSession: false }
+  });
+
+  const expiresAt = new Date().toISOString();
+  const { data: updated, error } = await supabase.auth.admin.updateUserById(userId, {
+    user_metadata: { password_expires_at: expiresAt, passwordExpiresAt: expiresAt }
+  });
+
+  if (error || !updated?.user) {
+    console.error('password expire failed:', error?.message);
+    return c.json({ message: 'Failed to update user', detail: error?.message }, 502);
+  }
+
+  const u = updated.user;
+  const email = u.email || '';
+  const meta = u.user_metadata as Record<string, unknown> | undefined;
+  const rawExpiry =
+    (meta?.password_expires_at as string | undefined) ??
+    (meta?.passwordExpiresAt as string | undefined);
+  const passwordExpiresAt = typeof rawExpiry === 'string' ? rawExpiry : expiresAt;
+
+  const profileRes = await supabase
+    .from('profiles')
+    .select('user_id, username, nome_completo')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  const profile = profileRes.data as ProfilesTableRow | null;
+  const displayName =
+    profile?.nome_completo && profile.nome_completo.trim().length > 0
+      ? profile.nome_completo.trim()
+      : email;
+
+  const { data: roleRow } = await supabase.from('user_roles').select('role').eq('user_id', userId).maybeSingle();
+
+  return c.json({
+    id: userId,
+    username: String(profile?.username || email || ''),
+    email,
+    fullName: displayName,
+    role: toManagedUserRole(String((roleRow as { role?: string } | null)?.role || 'aluno')),
+    active: !u.banned_until,
+    passwordExpiresAt
+  });
+});
+
 app.get('/api/videos/my-videos', async (c) => {
   try {
     const user = c.get('user');

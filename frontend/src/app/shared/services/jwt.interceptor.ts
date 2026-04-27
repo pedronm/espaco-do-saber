@@ -1,6 +1,6 @@
 import { Injectable } from '@angular/core';
 import { HttpRequest, HttpHandler, HttpEvent, HttpInterceptor } from '@angular/common/http';
-import { Observable, from } from 'rxjs';
+import { Observable, from, of } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
 import { AuthService } from './auth.service';
 import { environment } from '../../../environments/environment';
@@ -26,6 +26,15 @@ export class JwtInterceptor implements HttpInterceptor {
     }
 
     return from(this.authService.getAccessTokenSilently()).pipe(
+      catchError((error) => {
+        console.error('[JwtInterceptor] Failed to resolve token', {
+          method: request.method,
+          url: request.url,
+          message: error?.message || String(error)
+        });
+        const fallback = this.authService.getToken();
+        return of(typeof fallback === 'string' ? fallback : '');
+      }),
       switchMap((token) => {
         const resolvedToken = (token && token.length > 0 ? token : null) || this.authService.getToken() || '';
         if (!resolvedToken) {
@@ -49,22 +58,6 @@ export class JwtInterceptor implements HttpInterceptor {
         });
 
         return next.handle(authorizedRequest);
-      }),
-      catchError((error) => {
-        console.error('[JwtInterceptor] Failed to resolve token', {
-          method: request.method,
-          url: request.url,
-          message: error?.message || String(error)
-        });
-        const fallback = this.authService.getToken();
-        if (fallback) {
-          return next.handle(
-            request.clone({
-              setHeaders: { Authorization: `Bearer ${fallback}` }
-            })
-          );
-        }
-        return next.handle(request);
       })
     );
   }

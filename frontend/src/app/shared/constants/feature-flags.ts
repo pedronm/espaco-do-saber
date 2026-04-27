@@ -4,8 +4,10 @@ type FeatureName = 'videoOn' | 'streamOn' | 'muxOn' | 'r2On' | 'healthchecksOn' 
 
 export function isFeatureOn(featureName: FeatureName): boolean {
   const features = environment.features || {};
-  // Admin approval can be toggled independently from the global media feature gate.
-  if (features.globalOn === false && featureName !== 'adminAdmissionOn') {
+  // `globalOn` is a master switch for media-related features only.
+  // Operational/UX features should still be togglable independently.
+  const mediaFeatures: FeatureName[] = ['videoOn', 'r2On', 'streamOn', 'muxOn'];
+  if (features.globalOn === false && mediaFeatures.includes(featureName)) {
     return false;
   }
 
